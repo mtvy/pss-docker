@@ -1,4 +1,4 @@
-docker ps --format '
+docker ps -a --format '
 ┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
 │     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
 │     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
