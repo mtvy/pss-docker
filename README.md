@@ -5,8 +5,10 @@ Colorized, readable `docker ps` output.
 ### One-command install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mtvy/psss-docker/main/pss-docker.sh | sudo install -m 0755 /dev/stdin /usr/local/bin/docker-ps
+curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh | sudo tee /usr/local/bin/docker-ps >/dev/null && sudo chmod 0755 /usr/local/bin/docker-ps
 ```
+
+Why: BSD `install` (macOS) can’t read from `/dev/stdin`; `tee` works everywhere.
 
 Notes:
 - Requires `sudo` rights to write into `/usr/local/bin`.
