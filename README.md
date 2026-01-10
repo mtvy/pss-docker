@@ -37,3 +37,4 @@ chmod +x pss-docker.sh
 sudo install -m 0755 pss-docker.sh /usr/local/bin/docker-ps
 ```
 # pss-docker
+<img width="539" height="359" alt="Снимок экрана 2026-01-10 в 23 05 47" src="https://github.com/user-attachments/assets/1fc09646-d9c2-4ed0-bdd9-5616111c2191" />
