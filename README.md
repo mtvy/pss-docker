@@ -5,7 +5,7 @@ Colorized, readable `docker ps` output.
 ### One-command install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<your-username>/psss-docker/main/pss-docker.sh | sudo install -m 0755 /dev/stdin /usr/local/bin/docker-ps
+curl -fsSL https://raw.githubusercontent.com/mtvy/psss-docker/main/pss-docker.sh | sudo install -m 0755 /dev/stdin /usr/local/bin/docker-ps
 ```
 
 Notes:
