@@ -47,29 +47,25 @@ _docker_ps_fmt='
 
 # dc-ps → docker compose ps -a
 if [[ "$_invocation" == "dc-ps" ]]; then
-  _compose_format='{{.Name}}|{{.Image}}|{{.Command}}|{{.Status}}|{{.Size}}|{{.Service}}'
-  _compose_output=$(docker compose ps -a --format "$_compose_format")
-  # Filter lines containing the search string (case-insensitive)
+  _compose_fmt='
+┌{{"\033[93m"}}{{.Name}}{{"\033[0m"}}
+│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
+│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
+│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
+│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
+│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
+│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
+│     [{{"\033[96m"}}State{{"\033[0m"}}]      {{.State}}
+│     [{{"\033[96m"}}Status{{"\033[0m"}}]     {{.Status}}
+│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
+│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
+│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
+└─────────────────\n'
   if [[ -n "$_filter" ]]; then
-    _compose_output=$(echo "$_compose_output" | grep -i "$_filter" || true)
+    docker compose ps -a --format "$_compose_fmt" | grep -i "$_filter" || true
+  else
+    docker compose ps -a --format "$_compose_fmt"
   fi
-  while IFS='|' read -r name image command status size service; do
-    [[ -z "$name" ]] && continue
-    _display_name=$(echo "$name" | sed 's/.*\///')
-    printf '┌\033[93m%s\033[0m\n' "$_display_name"
-    printf '│     [\033[96mImage\033[0m]      %s\n' "$image"
-    printf '│     [\033[96mPorts\033[0m]      %s\n' ""
-    printf '│     [\033[96mID\033[0m]         %s\n' "-"
-    printf '│     [\033[96mCommand\033[0m]    %s\n' "$command"
-    printf '│     [\033[96mCreatedAt\033[0m]  %s\n' ""
-    printf '│     [\033[96mRunningFor\033[0m] %s\n' ""
-    printf '│     [\033[96mState\033[0m]      %s\n' "$status"
-    printf '│     [\033[96mStatus\033[0m]     %s\n' "$status"
-    printf '│     [\033[96mSize\033[0m]       %s\n' "$size"
-    printf '│     [\033[96mNames\033[0m]      %s\n' "$name"
-    printf '│     [\033[96mNetworks\033[0m]   %s\n' "$service"
-    printf '└─────────────────\n'
-  done <<< "$_compose_output"
   exit 0
 fi
 
