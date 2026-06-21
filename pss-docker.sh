@@ -47,20 +47,7 @@ _docker_ps_fmt='
 
 # dc-ps → docker compose ps -a
 if [[ "$_invocation" == "dc-ps" ]]; then
-  _compose_fmt='
-┌{{"\033[93m"}}{{.Name}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
-│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
-│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
-│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
-│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
-│     [{{"\033[96m"}}State{{"\033[0m"}}]      {{.State}}
-│     [{{"\033[96m"}}Status{{"\033[0m"}}]     {{.Status}}
-│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
-│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
-│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
-└─────────────────\n'
+  _compose_fmt=$(echo "$_docker_ps_fmt" | sed 's/{{\.Names}}/{{.Name}}/g')
   if [[ -n "$_filter" ]]; then
     docker compose ps -a --format "$_compose_fmt" | grep -i "$_filter" || true
   else
