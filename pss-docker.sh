@@ -46,9 +46,9 @@ done
 
 _state_color() {
   case "$1" in
-    running) printf '%s' '\033[92m' ;;
-    exited)  printf '%s' '\033[91m' ;;
-    *)       printf '%s' '\033[93m' ;;
+    running) printf '%s' $'\033[92m' ;;
+    exited)  printf '%s' $'\033[91m' ;;
+    *)       printf '%s' $'\033[93m' ;;
   esac
 }
 
@@ -96,24 +96,25 @@ _print_card() {
   local _sc
   _sc=$(_state_color "$_state")
 
-  printf '┌%s%s\033[0m\n' "$_sc" "$_names"
+  printf '┌%b%s\033[0m\n' "$_sc" "$_names"
   printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
   printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
-  if [[ "$_show_memory" == true ]]; then
-    local _mem
-    _mem=$(_lookup_memory "$_names")
-    printf '│     [\033[96mMemory\033[0m]     %s\n' "$_mem"
-  fi
   printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
   printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
   printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
   printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
-  printf '│     [\033[96mState\033[0m]      %s%s\033[0m\n' "$_sc" "$_state"
-  printf '│     [\033[96mStatus\033[0m]     %s%s\033[0m\n' "$_sc" "$_status"
+  printf '│     [\033[96mState\033[0m]      %b%s\033[0m\n' "$_sc" "$_state"
+  printf '│     [\033[96mStatus\033[0m]     %b%s\033[0m\n' "$_sc" "$_status"
   printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
   printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
   printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
   printf '└─────────────────\n'
+
+  if [[ "$_show_memory" == true ]]; then
+    local _mem
+    _mem=$(_lookup_memory "$_names")
+    printf '  ↳ [\033[96mMemory\033[0m]  %s\n' "$_mem"
+  fi
 
   if [[ "$_show_image" == true ]]; then
     local _img_info _img_tag _img_size
@@ -143,10 +144,24 @@ if [[ "$_show_image" == true ]]; then
   _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
 fi
 
-_ps_pipe_fmt='{{.Names}}	{{.Image}}	{{.Ports}}	{{.ID}}	{{.Command}}	{{.CreatedAt}}	{{.RunningFor}}	{{.State}}	{{.Status}}	{{.Size}}	{{.Networks}}'
+_ps_sep=$'\x1f'
+_ps_pipe_fmt='{{.Names}}{{"\x1f"}}{{.Image}}{{"\x1f"}}{{.Ports}}{{"\x1f"}}{{.ID}}{{"\x1f"}}{{.Command}}{{"\x1f"}}{{.CreatedAt}}{{"\x1f"}}{{.RunningFor}}{{"\x1f"}}{{.State}}{{"\x1f"}}{{.Status}}{{"\x1f"}}{{.Size}}{{"\x1f"}}{{.Networks}}'
 _ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
 
-while IFS=$'\t' read -r _names _image _ports _id _command _created_at _running_for _state _status _size _networks; do
+while IFS= read -r _line; do
+  [[ -z "$_line" ]] && continue
+  _names="${_line%%$_ps_sep*}"
+  _rest="${_line#*$_ps_sep}"
+  _image="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _ports="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _id="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _command="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _created_at="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _running_for="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _state="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _status="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _size="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _networks="${_rest}"
   [[ -z "$_names" ]] && continue
   _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
 done <<< "$_ps_output"
