@@ -6,11 +6,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Determine invocation name (supports symlink: d-ps, dc-ps)
 _invocation="${0##*/}"
 
-# Parse arguments: -f <filter>
+# Parse arguments: -f <filter>  -a (all containers)
 _filter=""
+_all=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f)
@@ -22,6 +22,10 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ;;
+    -a)
+      _all=true
+      shift
+      ;;
     *)
       echo "${_invocation}: unknown argument '$1'" >&2
       exit 1
@@ -29,7 +33,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Shared card format template (used by both d-ps and dc-ps)
+# Shared card format template
 _docker_ps_fmt='
 ┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
 │     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
@@ -45,20 +49,13 @@ _docker_ps_fmt='
 │     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
 └─────────────────\n'
 
-# dc-ps → docker compose ps -a
-if [[ "$_invocation" == "dc-ps" ]]; then
-  _compose_fmt=$(echo "$_docker_ps_fmt" | sed 's/{{\.Names}}/{{.Name}}/g')
-  if [[ -n "$_filter" ]]; then
-    docker compose ps -a --format "$_compose_fmt" | grep -i "$_filter" || true
-  else
-    docker compose ps -a --format "$_compose_fmt"
-  fi
-  exit 0
+# Build docker ps command with optional flags
+_docker_ps_cmd=(docker ps)
+if [[ "$_all" == true ]]; then
+  _docker_ps_cmd+=(-a)
+fi
+if [[ -n "$_filter" ]]; then
+  _docker_ps_cmd+=(--filter "name=$_filter")
 fi
 
-# d-ps — docker ps with optional name filter
-if [[ -n "$_filter" ]]; then
-  docker ps --filter "name=$_filter" --format "$_docker_ps_fmt"
-else
-  docker ps --format "$_docker_ps_fmt"
-fi
+"${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
