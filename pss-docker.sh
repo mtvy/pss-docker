@@ -44,38 +44,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Shared card format template (fast path)
-_docker_ps_fmt='
-┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
-│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
-│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
-│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
-│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
-│     [{{"\033[96m"}}State{{"\033[0m"}}]      {{.State}}
-│     [{{"\033[96m"}}Status{{"\033[0m"}}]     {{.Status}}
-│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
-│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
-│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
-└─────────────────\n'
+_state_color() {
+  case "$1" in
+    running) printf '%s' '\033[92m' ;;
+    exited)  printf '%s' '\033[91m' ;;
+    *)       printf '%s' '\033[93m' ;;
+  esac
+}
 
-# Build docker ps command with optional flags
-_docker_ps_cmd=(docker ps)
-if [[ "$_all" == true ]]; then
-  _docker_ps_cmd+=(-a)
-fi
-if [[ -n "$_filter" ]]; then
-  _docker_ps_cmd+=(--filter "name=$_filter")
-fi
-
-# Fast path: no memory/image extras
-if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
-  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
-  exit 0
-fi
-
-# Extended path: -m / -mi
 _lookup_memory() {
   local _name="$1"
   local _line
@@ -106,7 +82,6 @@ _lookup_image_info() {
     fi
   fi
 
-  # Fallback: match by repo:tag name from docker ps
   _line=$(echo "$_images_data" | grep -F "|${_image_name}|" | head -n1 || true)
   if [[ -n "$_line" ]]; then
     echo "${_line#*|}"
@@ -114,6 +89,49 @@ _lookup_image_info() {
     echo "${_image_name}|-"
   fi
 }
+
+_print_card() {
+  local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
+  local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
+  local _sc
+  _sc=$(_state_color "$_state")
+
+  printf '┌%s%s\033[0m\n' "$_sc" "$_names"
+  printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
+  printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
+  if [[ "$_show_memory" == true ]]; then
+    local _mem
+    _mem=$(_lookup_memory "$_names")
+    printf '│     [\033[96mMemory\033[0m]     %s\n' "$_mem"
+  fi
+  printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
+  printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
+  printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
+  printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
+  printf '│     [\033[96mState\033[0m]      %s%s\033[0m\n' "$_sc" "$_state"
+  printf '│     [\033[96mStatus\033[0m]     %s%s\033[0m\n' "$_sc" "$_status"
+  printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
+  printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
+  printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
+  printf '└─────────────────\n'
+
+  if [[ "$_show_image" == true ]]; then
+    local _img_info _img_tag _img_size
+    _img_info=$(_lookup_image_info "$_id" "$_image")
+    _img_tag="${_img_info%%|*}"
+    _img_size="${_img_info##*|}"
+    printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n\n' "$_img_tag" "$_img_size"
+  fi
+}
+
+# Build docker ps command with optional flags
+_docker_ps_cmd=(docker ps)
+if [[ "$_all" == true ]]; then
+  _docker_ps_cmd+=(-a)
+fi
+if [[ -n "$_filter" ]]; then
+  _docker_ps_cmd+=(--filter "name=$_filter")
+fi
 
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then
@@ -130,29 +148,5 @@ _ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
 
 while IFS=$'\t' read -r _names _image _ports _id _command _created_at _running_for _state _status _size _networks; do
   [[ -z "$_names" ]] && continue
-
-  printf '┌\033[93m%s\033[0m\n' "$_names"
-  printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
-  printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
-  if [[ "$_show_memory" == true ]]; then
-    _mem=$(_lookup_memory "$_names")
-    printf '│     [\033[96mMemory\033[0m]    %s\n' "$_mem"
-  fi
-  printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
-  printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
-  printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
-  printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
-  printf '│     [\033[96mState\033[0m]      %s\n' "$_state"
-  printf '│     [\033[96mStatus\033[0m]     %s\n' "$_status"
-  printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
-  printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
-  printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
-  printf '└─────────────────\n'
-
-  if [[ "$_show_image" == true ]]; then
-    _img_info=$(_lookup_image_info "$_id" "$_image")
-    _img_tag="${_img_info%%|*}"
-    _img_size="${_img_info##*|}"
-    printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n' "$_img_tag" "$_img_size"
-  fi
+  _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
 done <<< "$_ps_output"
