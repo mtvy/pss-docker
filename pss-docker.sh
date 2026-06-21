@@ -136,7 +136,7 @@ while IFS=$'\t' read -r _names _image _ports _id _command _created_at _running_f
   printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
   if [[ "$_show_memory" == true ]]; then
     _mem=$(_lookup_memory "$_names")
-    printf '│     [\033[96mMemory\033[0m]    %s\n' "$_mem"
+    printf '│     [\033[96mMemory\033[0m]     %s\n' "$_mem"
   fi
   printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
   printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
