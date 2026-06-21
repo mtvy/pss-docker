@@ -29,6 +29,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Shared card format template (used by both d-ps and dc-ps)
+_docker_ps_fmt='
+┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
+│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
+│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
+│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
+│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
+│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
+│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
+│     [{{"\033[96m"}}State{{"\033[0m"}}]      {{.State}}
+│     [{{"\033[96m"}}Status{{"\033[0m"}}]     {{.Status}}
+│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
+│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
+│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
+└─────────────────\n'
+
 # dc-ps → docker compose ps -a
 if [[ "$_invocation" == "dc-ps" ]]; then
   _compose_format='{{.Name}}|{{.Image}}|{{.Command}}|{{.Status}}|{{.Size}}|{{.Service}}'
@@ -58,21 +74,6 @@ if [[ "$_invocation" == "dc-ps" ]]; then
 fi
 
 # d-ps — docker ps with optional name filter
-_docker_ps_fmt='
-┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
-│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
-│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
-│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
-│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
-│     [{{"\033[96m"}}State{{"\033[0m"}}]      {{.State}}
-│     [{{"\033[96m"}}Status{{"\033[0m"}}]     {{.Status}}
-│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
-│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
-│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
-└─────────────────\n'
-
 if [[ -n "$_filter" ]]; then
   docker ps --filter "name=$_filter" --format "$_docker_ps_fmt"
 else
