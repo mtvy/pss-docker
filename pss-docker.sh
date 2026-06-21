@@ -80,6 +80,9 @@ _lookup_memory() {
   local _name="$1"
   local _line
   _line=$(echo "$_stats_data" | grep -F "${_name}|" | head -n1 || true)
+  if [[ -z "$_line" ]]; then
+    _line=$(echo "$_stats_data" | grep -F "/${_name}|" | head -n1 || true)
+  fi
   if [[ -n "$_line" ]]; then
     echo "${_line#*|}"
   else
@@ -88,16 +91,27 @@ _lookup_memory() {
 }
 
 _lookup_image_info() {
-  local _image_id="$1"
-  local _short_id="${_image_id#sha256:}"
-  _short_id="${_short_id:0:12}"
-  local _line
-  _line=$(echo "$_images_data" | grep -F "${_short_id}|" | head -n1 || true)
+  local _container_id="$1"
+  local _image_name="$2"
+  local _image_sha _short_id _line
+
+  _image_sha=$(docker inspect --format '{{.Image}}' "$_container_id" 2>/dev/null || true)
+  if [[ -n "$_image_sha" ]]; then
+    _short_id="${_image_sha#sha256:}"
+    _short_id="${_short_id:0:12}"
+    _line=$(echo "$_images_data" | grep -F "${_short_id}|" | head -n1 || true)
+    if [[ -n "$_line" ]]; then
+      echo "${_line#*|}"
+      return
+    fi
+  fi
+
+  # Fallback: match by repo:tag name from docker ps
+  _line=$(echo "$_images_data" | grep -F "|${_image_name}|" | head -n1 || true)
   if [[ -n "$_line" ]]; then
-    # ID|repo:tag|size
     echo "${_line#*|}"
   else
-    echo "-|-"
+    echo "${_image_name}|-"
   fi
 }
 
@@ -111,10 +125,10 @@ if [[ "$_show_image" == true ]]; then
   _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
 fi
 
-_ps_pipe_fmt='{{.Names}}|{{.Image}}|{{.ImageID}}|{{.Ports}}|{{.ID}}|{{.Command}}|{{.CreatedAt}}|{{.RunningFor}}|{{.State}}|{{.Status}}|{{.Size}}|{{.Networks}}'
+_ps_pipe_fmt='{{.Names}}	{{.Image}}	{{.Ports}}	{{.ID}}	{{.Command}}	{{.CreatedAt}}	{{.RunningFor}}	{{.State}}	{{.Status}}	{{.Size}}	{{.Networks}}'
 _ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
 
-while IFS='|' read -r _names _image _image_id _ports _id _command _created_at _running_for _state _status _size _networks; do
+while IFS=$'\t' read -r _names _image _ports _id _command _created_at _running_for _state _status _size _networks; do
   [[ -z "$_names" ]] && continue
 
   printf '┌\033[93m%s\033[0m\n' "$_names"
@@ -136,13 +150,9 @@ while IFS='|' read -r _names _image _image_id _ports _id _command _created_at _r
   printf '└─────────────────\n'
 
   if [[ "$_show_image" == true ]]; then
-    _img_info=$(_lookup_image_info "$_image_id")
+    _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    if [[ "$_img_tag" == "-" ]]; then
-      _img_tag="$_image"
-      _img_size="-"
-    fi
     printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n' "$_img_tag" "$_img_size"
   fi
 done <<< "$_ps_output"
