@@ -99,6 +99,42 @@ d-ps -a -f web
 
 List all containers (including stopped) whose names contain "web".
 
+### `d-ps -m`
+
+Show container RAM usage (from `docker stats`) inside each card:
+
+```bash
+d-ps -m
+```
+
+Adds a `[Memory]` field after `[Ports]`, e.g. `512MiB / 2GiB`. Stopped containers show `-`.
+
+### `d-ps -mi`
+
+Show RAM usage plus image name and disk size below each card:
+
+```bash
+d-ps -mi
+```
+
+Example output:
+
+```
+┌paperless-webserver-1
+│     [Image]      ghcr.io/paperless-ngx/paperless-ngx:dev
+│     [Ports]      0.0.0.0:8000->8000/tcp
+│     [Memory]     512MiB / 2GiB
+│     ...
+└─────────────────
+  ↳ [Image]  ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
+```
+
+Combine with other flags:
+
+```bash
+d-ps -a -f web -mi
+```
+
 ## Update
 
 Re-run the install command; it overwrites the installed binary.
@@ -114,3 +150,9 @@ sudo rm /usr/local/bin/d-ps
 - **Bash** 3+ (macOS ships with Bash 3; Linux typically has Bash 4+)
 - **Docker CLI** installed and available on `PATH`
 - A terminal that supports **ANSI color escape codes** (all modern terminals do)
+
+## Limitations
+
+- `-m` / `-mi` require an extra `docker stats` call; memory is only available for running containers.
+- `-mi` adds a `docker images` lookup for image disk sizes.
+- Other `docker ps` flags (beyond `-a`, `-f`, `-m`, `-mi`) are not supported.

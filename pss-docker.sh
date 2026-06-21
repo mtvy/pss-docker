@@ -8,9 +8,11 @@ fi
 
 _invocation="${0##*/}"
 
-# Parse arguments: -f <filter>  -a (all containers)
+# Parse arguments: -f <filter>  -a (all)  -m (memory)  -mi (memory + image size)
 _filter=""
 _all=false
+_show_memory=false
+_show_image=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f)
@@ -26,6 +28,15 @@ while [[ $# -gt 0 ]]; do
       _all=true
       shift
       ;;
+    -mi)
+      _show_memory=true
+      _show_image=true
+      shift
+      ;;
+    -m)
+      _show_memory=true
+      shift
+      ;;
     *)
       echo "${_invocation}: unknown argument '$1'" >&2
       exit 1
@@ -33,7 +44,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Shared card format template
+# Shared card format template (fast path)
 _docker_ps_fmt='
 ┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
 │     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
@@ -58,4 +69,80 @@ if [[ -n "$_filter" ]]; then
   _docker_ps_cmd+=(--filter "name=$_filter")
 fi
 
-"${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
+# Fast path: no memory/image extras
+if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
+  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
+  exit 0
+fi
+
+# Extended path: -m / -mi
+_lookup_memory() {
+  local _name="$1"
+  local _line
+  _line=$(echo "$_stats_data" | grep -F "${_name}|" | head -n1 || true)
+  if [[ -n "$_line" ]]; then
+    echo "${_line#*|}"
+  else
+    echo "-"
+  fi
+}
+
+_lookup_image_info() {
+  local _image_id="$1"
+  local _short_id="${_image_id#sha256:}"
+  _short_id="${_short_id:0:12}"
+  local _line
+  _line=$(echo "$_images_data" | grep -F "${_short_id}|" | head -n1 || true)
+  if [[ -n "$_line" ]]; then
+    # ID|repo:tag|size
+    echo "${_line#*|}"
+  else
+    echo "-|-"
+  fi
+}
+
+_stats_data=""
+if [[ "$_show_memory" == true ]]; then
+  _stats_data=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null || true)
+fi
+
+_images_data=""
+if [[ "$_show_image" == true ]]; then
+  _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
+fi
+
+_ps_pipe_fmt='{{.Names}}|{{.Image}}|{{.ImageID}}|{{.Ports}}|{{.ID}}|{{.Command}}|{{.CreatedAt}}|{{.RunningFor}}|{{.State}}|{{.Status}}|{{.Size}}|{{.Networks}}'
+_ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
+
+while IFS='|' read -r _names _image _image_id _ports _id _command _created_at _running_for _state _status _size _networks; do
+  [[ -z "$_names" ]] && continue
+
+  printf '┌\033[93m%s\033[0m\n' "$_names"
+  printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
+  printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
+  if [[ "$_show_memory" == true ]]; then
+    _mem=$(_lookup_memory "$_names")
+    printf '│     [\033[96mMemory\033[0m]    %s\n' "$_mem"
+  fi
+  printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
+  printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
+  printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
+  printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
+  printf '│     [\033[96mState\033[0m]      %s\n' "$_state"
+  printf '│     [\033[96mStatus\033[0m]     %s\n' "$_status"
+  printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
+  printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
+  printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
+  printf '└─────────────────\n'
+
+  if [[ "$_show_image" == true ]]; then
+    _img_info=$(_lookup_image_info "$_image_id")
+    _img_tag="${_img_info%%|*}"
+    _img_size="${_img_info##*|}"
+    if [[ "$_img_tag" == "-" ]]; then
+      _img_tag="$_image"
+      _img_size="-"
+    fi
+    printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n' "$_img_tag" "$_img_size"
+  fi
+done <<< "$_ps_output"
