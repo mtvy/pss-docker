@@ -6,13 +6,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# ANSI colors
-_C_RESET=$'\033[0m'
-_C_LABEL=$'\033[96m'
-_C_GREEN=$'\033[92m'
-_C_RED=$'\033[91m'
-_C_YELLOW=$'\033[93m'
-
+# ANSI color names (resolved in printf format strings)
 _color_for_state() {
   local _state _status _state_lc
   _state="$1"
@@ -20,16 +14,16 @@ _color_for_state() {
   _state_lc=$(printf '%s' "$_state" | tr '[:upper:]' '[:lower:]')
 
   case "$_state_lc" in
-    running) printf '%s' "$_C_GREEN"; return ;;
-    exited)  printf '%s' "$_C_RED"; return ;;
+    running) echo green; return ;;
+    exited)  echo red; return ;;
   esac
 
   case "$_status" in
-    Up*)     printf '%s' "$_C_GREEN"; return ;;
-    Exited*) printf '%s' "$_C_RED"; return ;;
+    Up*)     echo green; return ;;
+    Exited*) echo red; return ;;
   esac
 
-  printf '%s' "$_C_YELLOW"
+  echo yellow
 }
 
 _invocation="${0##*/}"
@@ -69,6 +63,23 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Shared card format (fast path: docker ps --format)
+_state_fmt='{{if eq .State "running"}}{{"\033[92m"}}{{else if eq .State "exited"}}{{"\033[91m"}}{{else}}{{"\033[93m"}}{{end}}'
+_docker_ps_fmt='
+┌'"$_state_fmt"'{{.Names}}{{"\033[0m"}}
+│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
+│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
+│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
+│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
+│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
+│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
+│     [{{"\033[96m"}}State{{"\033[0m"}}]      '"$_state_fmt"'{{.State}}{{"\033[0m"}}
+│     [{{"\033[96m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
+│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
+│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
+│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
+└─────────────────\n'
 
 _lookup_memory() {
   local _name="$1"
@@ -111,27 +122,52 @@ _lookup_image_info() {
 _print_card() {
   local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
-  local _sc
-  _sc=$(_color_for_state "$_state" "$_status")
+  local _color
+  _color=$(_color_for_state "$_state" "$_status")
 
-  printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET"
-  printf '│     [%sImage%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_image"
-  printf '│     [%sPorts%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
-  printf '│     [%sID%s]         %s\n' "$_C_LABEL" "$_C_RESET" "$_id"
-  printf '│     [%sCommand%s]    %s\n' "$_C_LABEL" "$_C_RESET" "$_command"
-  printf '│     [%sCreatedAt%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_created_at"
-  printf '│     [%sRunningFor%s] %s\n' "$_C_LABEL" "$_C_RESET" "$_running_for"
-  printf '│     [%sState%s]      %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_state" "$_C_RESET"
-  printf '│     [%sStatus%s]     %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
-  printf '│     [%sSize%s]       %s\n' "$_C_LABEL" "$_C_RESET" "$_size"
-  printf '│     [%sNames%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_names"
-  printf '│     [%sNetworks%s]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
+  case "$_color" in
+    green)
+      printf '┌\033[92m%s\033[0m\n' "$_names"
+      ;;
+    red)
+      printf '┌\033[91m%s\033[0m\n' "$_names"
+      ;;
+    *)
+      printf '┌\033[93m%s\033[0m\n' "$_names"
+      ;;
+  esac
+
+  printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
+  printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
+  printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
+  printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
+  printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
+  printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
+
+  case "$_color" in
+    green)
+      printf '│     [\033[96mState\033[0m]      \033[92m%s\033[0m\n' "$_state"
+      printf '│     [\033[96mStatus\033[0m]     \033[92m%s\033[0m\n' "$_status"
+      ;;
+    red)
+      printf '│     [\033[96mState\033[0m]      \033[91m%s\033[0m\n' "$_state"
+      printf '│     [\033[96mStatus\033[0m]     \033[91m%s\033[0m\n' "$_status"
+      ;;
+    *)
+      printf '│     [\033[96mState\033[0m]      \033[93m%s\033[0m\n' "$_state"
+      printf '│     [\033[96mStatus\033[0m]     \033[93m%s\033[0m\n' "$_status"
+      ;;
+  esac
+
+  printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
+  printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
+  printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
   printf '└─────────────────\n'
 
   if [[ "$_show_memory" == true ]]; then
     local _mem
     _mem=$(_lookup_memory "$_names")
-    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
+    printf '  ↳ [\033[96mMemory\033[0m]  %s\n' "$_mem"
   fi
 
   if [[ "$_show_image" == true ]]; then
@@ -139,7 +175,7 @@ _print_card() {
     _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    printf '  ↳ [%sImage%s]  %s  (%s)\n\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
+    printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n\n' "$_img_tag" "$_img_size"
   fi
 }
 
@@ -150,6 +186,12 @@ if [[ "$_all" == true ]]; then
 fi
 if [[ -n "$_filter" ]]; then
   _docker_ps_cmd+=(--filter "name=$_filter")
+fi
+
+# Fast path: no memory/image extras
+if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
+  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
+  exit 0
 fi
 
 _stats_data=""
