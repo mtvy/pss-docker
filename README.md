@@ -38,11 +38,7 @@ Each running container is rendered as a vertical card:
 
 ### Template fields
 
-Standard `docker ps` fields: `Names`, `Image`, `Ports`, `ID`, `Command`, `CreatedAt`, `RunningFor`, `State`, `Status`, `Size`, `Networks`.
-
-Conditional fields (shown with flags):
-- **Memory** (with `-m` / `-mi`): container memory usage (e.g. `1.2MB / 1.29GB`)
-- **ImageTotal** (with `-mi`): total size of unique images used by filtered containers
+The Go template exposes all standard `docker ps` fields: `Names`, `Image`, `Ports`, `ID`, `Command`, `CreatedAt`, `RunningFor`, `State`, `Status`, `Size`, `Networks`.
 
 ## Installation
 
@@ -102,34 +98,6 @@ d-ps -a -f web
 ```
 
 List all containers (including stopped) whose names contain "web".
-
-### `d-ps -m`
-
-Show memory usage for each container:
-
-```bash
-d-ps -m
-```
-
-Output includes a `Memory` field showing used/limit (e.g. `1.2MB / 1.29GB`).
-
-### `d-ps -mi`
-
-Show memory usage and image sizes:
-
-```bash
-d-ps -mi
-```
-
-Output includes `Memory` field and a total image size line below each card listing all unique images used by the filtered containers.
-
-### All flags combined
-
-```bash
-d-ps -mi -f web
-```
-
-Filter by name, show memory and image sizes for matching containers only.
 
 ## Update
 
