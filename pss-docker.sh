@@ -13,6 +13,25 @@ _C_GREEN=$'\033[92m'
 _C_RED=$'\033[91m'
 _C_YELLOW=$'\033[93m'
 
+_color_for_state() {
+  local _state _status _state_lc
+  _state="$1"
+  _status="$2"
+  _state_lc=$(printf '%s' "$_state" | tr '[:upper:]' '[:lower:]')
+
+  case "$_state_lc" in
+    running) printf '%s' "$_C_GREEN"; return ;;
+    exited)  printf '%s' "$_C_RED"; return ;;
+  esac
+
+  case "$_status" in
+    Up*)     printf '%s' "$_C_GREEN"; return ;;
+    Exited*) printf '%s' "$_C_RED"; return ;;
+  esac
+
+  printf '%s' "$_C_YELLOW"
+}
+
 _invocation="${0##*/}"
 
 # Parse arguments: -f <filter>  -a (all)  -m (memory)  -mi (memory + image size)
@@ -50,14 +69,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-_state_color() {
-  case "$1" in
-    running) printf '%s' "$_C_GREEN" ;;
-    exited)  printf '%s' "$_C_RED" ;;
-    *)       printf '%s' "$_C_YELLOW" ;;
-  esac
-}
 
 _lookup_memory() {
   local _name="$1"
@@ -101,26 +112,26 @@ _print_card() {
   local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
   local _sc
-  _sc=$(_state_color "$_state")
+  _sc=$(_color_for_state "$_state" "$_status")
 
-  printf '┌%b%s%b\n' "$_sc" "$_names" "$_C_RESET"
-  printf '│     [%bImage%b]      %s\n' "$_C_LABEL" "$_C_RESET" "$_image"
-  printf '│     [%bPorts%b]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
-  printf '│     [%bID%b]         %s\n' "$_C_LABEL" "$_C_RESET" "$_id"
-  printf '│     [%bCommand%b]    %s\n' "$_C_LABEL" "$_C_RESET" "$_command"
-  printf '│     [%bCreatedAt%b]  %s\n' "$_C_LABEL" "$_C_RESET" "$_created_at"
-  printf '│     [%bRunningFor%b] %s\n' "$_C_LABEL" "$_C_RESET" "$_running_for"
-  printf '│     [%bState%b]      %b%s%b\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_state" "$_C_RESET"
-  printf '│     [%bStatus%b]     %b%s%b\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
-  printf '│     [%bSize%b]       %s\n' "$_C_LABEL" "$_C_RESET" "$_size"
-  printf '│     [%bNames%b]      %s\n' "$_C_LABEL" "$_C_RESET" "$_names"
-  printf '│     [%bNetworks%b]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
+  printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET"
+  printf '│     [%sImage%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_image"
+  printf '│     [%sPorts%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
+  printf '│     [%sID%s]         %s\n' "$_C_LABEL" "$_C_RESET" "$_id"
+  printf '│     [%sCommand%s]    %s\n' "$_C_LABEL" "$_C_RESET" "$_command"
+  printf '│     [%sCreatedAt%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_created_at"
+  printf '│     [%sRunningFor%s] %s\n' "$_C_LABEL" "$_C_RESET" "$_running_for"
+  printf '│     [%sState%s]      %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_state" "$_C_RESET"
+  printf '│     [%sStatus%s]     %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
+  printf '│     [%sSize%s]       %s\n' "$_C_LABEL" "$_C_RESET" "$_size"
+  printf '│     [%sNames%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_names"
+  printf '│     [%sNetworks%s]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
   printf '└─────────────────\n'
 
   if [[ "$_show_memory" == true ]]; then
     local _mem
     _mem=$(_lookup_memory "$_names")
-    printf '  ↳ [%bMemory%b]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
+    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
   fi
 
   if [[ "$_show_image" == true ]]; then
@@ -128,7 +139,7 @@ _print_card() {
     _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    printf '  ↳ [%bImage%b]  %s  (%s)\n\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
+    printf '  ↳ [%sImage%s]  %s  (%s)\n\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
   fi
 }
 
@@ -151,8 +162,8 @@ if [[ "$_show_image" == true ]]; then
   _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
 fi
 
-_ps_sep=$'\x1f'
-_ps_pipe_fmt='{{.Names}}{{"\x1f"}}{{.Image}}{{"\x1f"}}{{.Ports}}{{"\x1f"}}{{.ID}}{{"\x1f"}}{{.Command}}{{"\x1f"}}{{.CreatedAt}}{{"\x1f"}}{{.RunningFor}}{{"\x1f"}}{{.State}}{{"\x1f"}}{{.Status}}{{"\x1f"}}{{.Size}}{{"\x1f"}}{{.Networks}}'
+_ps_sep='|||'
+_ps_pipe_fmt='{{.Names}}|||{{.Image}}|||{{.Ports}}|||{{.ID}}|||{{.Command}}|||{{.CreatedAt}}|||{{.RunningFor}}|||{{.State}}|||{{.Status}}|||{{.Size}}|||{{.Networks}}'
 _ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
 
 while IFS= read -r _line; do
