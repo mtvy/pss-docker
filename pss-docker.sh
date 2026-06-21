@@ -6,6 +6,9 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+# Determine invocation name (supports symlink: d-ps, dc-ps)
+_invocation="${0##*/}"
+
 # Parse arguments: -f <filter>
 _filter=""
 while [[ $# -gt 0 ]]; do
@@ -15,42 +18,40 @@ while [[ $# -gt 0 ]]; do
         _filter="$2"
         shift 2
       else
-        echo "d-ps: -f requires a value" >&2
+        echo "${_invocation}: -f requires a value" >&2
         exit 1
       fi
       ;;
     *)
-      echo "d-ps: unknown argument '$1'" >&2
+      echo "${_invocation}: unknown argument '$1'" >&2
       exit 1
       ;;
   esac
 done
 
-# Determine invocation name (supports symlink: d-ps, dc-ps)
-_invocation="${0##*/}"
-
 # dc-ps → docker compose ps -a
 if [[ "$_invocation" == "dc-ps" ]]; then
   _compose_format='{{.Name}}|{{.Image}}|{{.Command}}|{{.Status}}|{{.Size}}|{{.Service}}'
+  _compose_output=$(docker compose ps -a --format "$_compose_format")
+  # Filter lines containing the search string (case-insensitive)
   if [[ -n "$_filter" ]]; then
-    _compose_output=$(docker compose ps -a --filter "name=$_filter" --format "$_compose_format")
-  else
-    _compose_output=$(docker compose ps -a --format "$_compose_format")
+    _compose_output=$(echo "$_compose_output" | grep -i "$_filter" || true)
   fi
   while IFS='|' read -r name image command status size service; do
     [[ -z "$name" ]] && continue
-    printf '┌%s\n' "$(echo "$name" | sed 's/.*\///')"
-    printf '│     [%s]      %s\n' "Image" "$image"
-    printf '│     [%s]      %s\n' "Ports" ""
-    printf '│     [%s]         -\n' "ID"
-    printf '│     [%s]    %s\n' "Command" "$command"
-    printf '│     [%s]  %s\n' "CreatedAt" ""
-    printf '│     [%s] %s\n' "RunningFor" ""
-    printf '│     [%s]      %s\n' "State" "$status"
-    printf '│     [%s]     %s\n' "Status" "$status"
-    printf '│     [%s]       %s\n' "Size" "$size"
-    printf '│     [%s]      %s\n' "Names" "$name"
-    printf '│     [%s]   %s\n' "Networks" "$service"
+    _display_name=$(echo "$name" | sed 's/.*\///')
+    printf '┌\033[93m%s\033[0m\n' "$_display_name"
+    printf '│     [\033[96mImage\033[0m]      %s\n' "$image"
+    printf '│     [\033[96mPorts\033[0m]      %s\n' ""
+    printf '│     [\033[96mID\033[0m]         %s\n' "-"
+    printf '│     [\033[96mCommand\033[0m]    %s\n' "$command"
+    printf '│     [\033[96mCreatedAt\033[0m]  %s\n' ""
+    printf '│     [\033[96mRunningFor\033[0m] %s\n' ""
+    printf '│     [\033[96mState\033[0m]      %s\n' "$status"
+    printf '│     [\033[96mStatus\033[0m]     %s\n' "$status"
+    printf '│     [\033[96mSize\033[0m]       %s\n' "$size"
+    printf '│     [\033[96mNames\033[0m]      %s\n' "$name"
+    printf '│     [\033[96mNetworks\033[0m]   %s\n' "$service"
     printf '└─────────────────\n'
   done <<< "$_compose_output"
   exit 0
