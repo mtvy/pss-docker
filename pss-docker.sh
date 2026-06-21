@@ -6,7 +6,38 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-docker ps --format '
+# Determine invocation name (supports symlink: d-ps, dc-ps)
+_invocation="${0##*/}"
+
+# dc-ps → docker compose ps -a
+if [[ "$_invocation" == "dc-ps" ]]; then
+  _compose_output=$(docker compose ps -a --format '{{.Name}}|{{.Image}}|{{.Command}}|{{.Status}}|{{.Size}}|{{.Service}}')
+  while IFS='|' read -r name image command status size service; do
+    [[ -z "$name" ]] && continue
+    printf '┌%s\n' "$(echo "$name" | sed 's/.*\///')"
+    printf '│     [%s]      %s\n' "Image" "$image"
+    printf '│     [%s]      %s\n' "Ports" ""
+    printf '│     [%s]         -\n' "ID"
+    printf '│     [%s]    %s\n' "Command" "$command"
+    printf '│     [%s]  %s\n' "CreatedAt" ""
+    printf '│     [%s] %s\n' "RunningFor" ""
+    printf '│     [%s]      %s\n' "State" "$status"
+    printf '│     [%s]     %s\n' "Status" "$status"
+    printf '│     [%s]       %s\n' "Size" "$size"
+    printf '│     [%s]      %s\n' "Names" "$name"
+    printf '│     [%s]   %s\n' "Networks" "$service"
+    printf '└─────────────────\n'
+  done <<< "$_compose_output"
+  exit 0
+fi
+
+# d-ps — optional name filter via positional argument
+_docker_ps_filter=""
+if [[ $# -ge 1 ]]; then
+  _docker_ps_filter="--filter" "name=$1"
+fi
+
+docker ps $_docker_ps_filter --format '
 ┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
 │     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
 │     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}

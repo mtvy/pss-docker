@@ -31,10 +31,10 @@ Each running container is rendered as a vertical card:
 
 ### Color mapping
 
-| Field      | Color            |
+|| Field      | Color            |
 |------------|------------------|
-| Container name (header) | Yellow (`\033[93m`) |
-| Labels (Image, Ports, …) | Cyan (`\033[96m`) |
+|| Container name (header) | Yellow (`\033[93m`) |
+|| Labels (Image, Ports, …) | Cyan (`\033[96m`) |
 
 ### Template fields
 
@@ -45,7 +45,7 @@ The Go template exposes all standard `docker ps` fields: `Names`, `Image`, `Port
 ### One-command install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh | sudo tee /usr/local/bin/docker-ps >/dev/null && sudo chmod 0755 /usr/local/bin/docker-ps
+curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh | sudo tee /usr/local/bin/d-ps >/dev/null && sudo chmod 0755 /usr/local/bin/d-ps
 ```
 
 > **Why `tee` and not `cat >`?** BSD `install` (macOS) cannot read from `/dev/stdin`; `tee` works on both Linux and macOS.
@@ -54,22 +54,51 @@ curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh 
 
 ```bash
 chmod +x pss-docker.sh
-sudo install -m 0755 pss-docker.sh /usr/local/bin/docker-ps
+sudo install -m 0755 pss-docker.sh /usr/local/bin/d-ps
+```
+
+### Symlink for `dc-ps`
+
+After installing `d-ps`, create a symlink to enable `dc-ps` (docker compose support):
+
+```bash
+sudo ln -sf /usr/local/bin/d-ps /usr/local/bin/dc-ps
 ```
 
 ### Notes
 
 - Requires `sudo` to write into `/usr/local/bin`.
 - Ensure Docker is installed and your user can run it (on Linux, add yourself to the `docker` group if needed).
-- The script installs as `docker-ps` on `PATH`.
+- The script installs as `d-ps` on `PATH`.
+- `dc-ps` is available as a symlink to the same script.
 
 ## Usage
 
+### `d-ps`
+
+List all running containers with card-style formatting:
+
 ```bash
-docker-ps
+d-ps
 ```
 
-That's it — the output replaces `docker ps` with a more readable layout.
+### `d-ps <partial>`
+
+Filter containers by partial name. Shows only containers whose names contain the given substring:
+
+```bash
+d-ps postgres
+```
+
+This will match containers like `db-postgres-1`, `postgres-4`, etc.
+
+### `dc-ps`
+
+List all containers from docker compose projects (equivalent to `docker compose ps -a`):
+
+```bash
+dc-ps
+```
 
 ## Update
 
@@ -78,16 +107,18 @@ Re-run the install command; it overwrites the installed binary.
 ## Uninstall
 
 ```bash
-sudo rm /usr/local/bin/docker-ps
+sudo rm /usr/local/bin/d-ps
+sudo rm -f /usr/local/bin/dc-ps
 ```
 
 ## Requirements
 
 - **Bash** 3+ (macOS ships with Bash 3; Linux typically has Bash 4+)
 - **Docker CLI** installed and available on `PATH`
+- **Docker Compose** plugin (for `dc-ps`)
 - A terminal that supports **ANSI color escape codes** (all modern terminals do)
 
 ## Limitations
 
-- No arguments — the script does not accept flags (e.g. `-a`, `--filter`). It is a fixed-format viewer.
-- Shows only running containers (uses `docker ps`, not `docker ps -a`).
+- `d-ps` accepts at most one argument (partial name filter). Other `docker ps` flags are not supported.
+- Shows only running containers (uses `docker ps`, not `docker ps -a`). Use `dc-ps` to list all compose containers.
