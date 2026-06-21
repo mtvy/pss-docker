@@ -32,12 +32,7 @@ if [[ "$_invocation" == "dc-ps" ]]; then
 fi
 
 # d-ps — optional name filter via positional argument
-_docker_ps_filter=""
-if [[ $# -ge 1 ]]; then
-  _docker_ps_filter="--filter" "name=$1"
-fi
-
-docker ps $_docker_ps_filter --format '
+_docker_ps_fmt='
 ┌{{"\033[93m"}}{{.Names}}{{"\033[0m"}}
 │     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
 │     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
@@ -51,3 +46,9 @@ docker ps $_docker_ps_filter --format '
 │     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
 │     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
 └─────────────────\n'
+
+if [[ $# -ge 1 ]]; then
+  docker ps --filter "name=$1" --format "$_docker_ps_fmt"
+else
+  docker ps --format "$_docker_ps_fmt"
+fi
