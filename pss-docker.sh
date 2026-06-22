@@ -435,7 +435,7 @@ _print_dependency_graph() {
     while IFS= read -r _service; do
       [[ -z "$_service" ]] && continue
       if [[ "$_printed_root" == true ]]; then
-        printf '\n      ↕\n\n'
+        printf '\n      ↕\n'
       fi
       _graph_visited=""
       _graph_print_chain "$_project" "$_service" "  "
@@ -447,7 +447,7 @@ _print_dependency_graph() {
   while IFS= read -r _service; do
     [[ -z "$_service" ]] && continue
     if [[ "$_printed_root" == true ]]; then
-      printf '\n      ↕\n\n'
+      printf '\n      ↕\n'
     fi
     _graph_visited=""
     _graph_print_chain "$_project" "$_service" "  "
@@ -456,30 +456,20 @@ _print_dependency_graph() {
 }
 
 _print_all_dependency_graphs() {
-  local _project _printed _header_printed
+  local _project _printed
 
   [[ -z "$_graph_projects" ]] && return
-  _header_printed=false
   _printed=false
   while IFS= read -r _project || [[ -n "$_project" ]]; do
     [[ -z "$_project" ]] && continue
     if ! _graph_project_has_edges "$_project"; then
       continue
     fi
-    if [[ "$_header_printed" == false ]]; then
-      printf '\n─────────────────\n'
-      _header_printed=true
-    fi
-    if [[ "$_printed" == true ]]; then
-      printf '\n'
-    fi
+    printf '\n'
     printf '%s── %s dependencies ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
     _print_dependency_graph "$_project"
     _printed=true
   done <<< "$_graph_projects"
-  if [[ "$_printed" == true ]]; then
-    printf '\n'
-  fi
 }
 
 _register_container_graph() {
