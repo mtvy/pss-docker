@@ -435,7 +435,7 @@ _print_dependency_graph() {
     while IFS= read -r _service; do
       [[ -z "$_service" ]] && continue
       if [[ "$_printed_root" == true ]]; then
-        printf '\n      ↕\n'
+        printf '      ↕\n'
       fi
       _graph_visited=""
       _graph_print_chain "$_project" "$_service" "  "
@@ -447,7 +447,7 @@ _print_dependency_graph() {
   while IFS= read -r _service; do
     [[ -z "$_service" ]] && continue
     if [[ "$_printed_root" == true ]]; then
-      printf '\n      ↕\n'
+      printf '      ↕\n'
     fi
     _graph_visited=""
     _graph_print_chain "$_project" "$_service" "  "
@@ -648,3 +648,5 @@ done <<< "$_ps_output"
 if [[ "$_show_deps_graph" == true ]]; then
   _print_all_dependency_graphs
 fi
+
+printf '\n'
