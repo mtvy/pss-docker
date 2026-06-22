@@ -167,8 +167,7 @@ Example output:
 
 ── infogram dependencies ──
   elasticsearch  (infogram-es)
-        │
-        ▼
+      ↓
   frontend  (infogram-frontend)
 ```
 

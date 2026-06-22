@@ -257,34 +257,74 @@ _graph_add_edge() {
 }
 
 _graph_children() {
-  local _project="$1" _from="$2"
-  echo "$_graph_edges" | grep -F "${_project}|${_from}|" 2>/dev/null | while IFS='|' read -r _p _f _t; do
-    printf '%s\n' "$_t"
-  done
+  local _project="$1" _from="$2" _p _f _t
+  while IFS='|' read -r _p _f _t; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" && "$_f" == "$_from" ]]; then
+      printf '%s\n' "$_t"
+    fi
+  done <<< "$_graph_edges"
 }
 
 _graph_is_dependent() {
-  local _project="$1" _service="$2"
-  echo "$_graph_edges" | grep -F "${_project}|" 2>/dev/null | grep -Fq "|${_service}$"
+  local _project="$1" _service="$2" _p _f _t
+  while IFS='|' read -r _p _f _t; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" && "$_t" == "$_service" ]]; then
+      return 0
+    fi
+  done <<< "$_graph_edges"
+  return 1
+}
+
+_graph_project_has_edges() {
+  local _project="$1" _p _f _t
+  while IFS='|' read -r _p _f _t; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" ]]; then
+      return 0
+    fi
+  done <<< "$_graph_edges"
+  return 1
 }
 
 _graph_all_services() {
-  local _project="$1"
-  {
-    echo "$_graph_nodes" | grep -F "${_project}|" 2>/dev/null | while IFS='|' read -r _p _s _n _st _stt; do
-      printf '%s\n' "$_s"
-    done
-    echo "$_graph_edges" | grep -F "${_project}|" 2>/dev/null | while IFS='|' read -r _p _f _t; do
-      printf '%s\n' "$_f"
-      printf '%s\n' "$_t"
-    done
-  } | grep -v '^$' | sort -u
+  local _project="$1" _p _s _f _t _n _st _stt _out
+  _out=""
+  while IFS='|' read -r _p _s _n _st _stt; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" ]]; then
+      _out="${_out}${_s}"$'\n'
+    fi
+  done <<< "$_graph_nodes"
+  while IFS='|' read -r _p _f _t; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" ]]; then
+      _out="${_out}${_f}"$'\n'
+      _out="${_out}${_t}"$'\n'
+    fi
+  done <<< "$_graph_edges"
+  if [[ -z "$_out" ]]; then
+    return 0
+  fi
+  printf '%s' "$_out" | grep -v '^$' 2>/dev/null | sort -u || true
+}
+
+_graph_find_node_line() {
+  local _project="$1" _service="$2" _p _s _rest
+  while IFS='|' read -r _p _s _rest; do
+    [[ -z "$_p" ]] && continue
+    if [[ "$_p" == "$_project" && "$_s" == "$_service" ]]; then
+      printf '%s|%s|%s' "$_p" "$_s" "$_rest"
+      return
+    fi
+  done <<< "$_graph_nodes"
 }
 
 _graph_print_node() {
   local _project="$1" _service="$2" _indent="$3"
   local _line _name _state _status _sc
-  _line=$(echo "$_graph_nodes" | grep -F "${_project}|${_service}|" 2>/dev/null | head -n1 || true)
+  _line=$(_graph_find_node_line "$_project" "$_service")
   _name=""
   _state=""
   _status=""
@@ -301,12 +341,44 @@ _graph_print_node() {
   fi
 }
 
+_graph_count_lines() {
+  local _text="$1" _n=0 _line
+  while IFS= read -r _line; do
+    [[ -z "$_line" ]] && continue
+    _n=$((_n + 1))
+  done <<< "$_text"
+  printf '%d' "$_n"
+}
+
+_graph_arrow_for_child() {
+  local _total="$1" _index="$2"
+  if [[ "$_total" -le 1 ]]; then
+    printf '↓'
+    return
+  fi
+  if [[ "$_total" -eq 2 ]]; then
+    if [[ "$_index" -eq 0 ]]; then
+      printf '↘'
+    else
+      printf '↙'
+    fi
+    return
+  fi
+  if [[ "$_index" -eq 0 ]]; then
+    printf '↘'
+  elif [[ "$_index" -eq $((_total - 1)) ]]; then
+    printf '↙'
+  else
+    printf '↓'
+  fi
+}
+
 _graph_print_chain() {
   local _project="$1" _service="$2" _indent="$3"
-  local _child _children _first _printed_child
+  local _child _children _first _child_total _child_index _arrow
 
   if echo "$_graph_visited" | grep -Fxq "$_service" 2>/dev/null; then
-    printf '%s      %s(cycle: %s)%s\n' "$_indent" "$_C_YELLOW" "$_service" "$_C_RESET"
+    printf '%s      %s↔ (cycle: %s)%s\n' "$_indent" "$_C_YELLOW" "$_service" "$_C_RESET"
     return
   fi
   if [[ -z "$_graph_visited" ]]; then
@@ -317,18 +389,21 @@ _graph_print_chain() {
 
   _graph_print_node "$_project" "$_service" "$_indent"
   _children=$(_graph_children "$_project" "$_service")
+  _child_total=$(_graph_count_lines "$_children")
+  _child_index=0
   _first=true
   while IFS= read -r _child; do
     [[ -z "$_child" ]] && continue
+    _arrow=$(_graph_arrow_for_child "$_child_total" "$_child_index")
     if [[ "$_first" == true ]]; then
-      printf '%s      │\n' "$_indent"
-      printf '%s      ▼\n' "$_indent"
+      printf '%s      %s\n' "$_indent" "$_arrow"
       _first=false
     else
       printf '\n'
+      printf '%s      %s\n' "$_indent" "$_arrow"
     fi
     _graph_print_chain "$_project" "$_child" "$_indent"
-    _printed_child=true
+    _child_index=$((_child_index + 1))
   done <<< "$_children"
 }
 
@@ -360,7 +435,7 @@ _print_dependency_graph() {
     while IFS= read -r _service; do
       [[ -z "$_service" ]] && continue
       if [[ "$_printed_root" == true ]]; then
-        printf '\n'
+        printf '\n      ↕\n\n'
       fi
       _graph_visited=""
       _graph_print_chain "$_project" "$_service" "  "
@@ -372,7 +447,7 @@ _print_dependency_graph() {
   while IFS= read -r _service; do
     [[ -z "$_service" ]] && continue
     if [[ "$_printed_root" == true ]]; then
-      printf '\n'
+      printf '\n      ↕\n\n'
     fi
     _graph_visited=""
     _graph_print_chain "$_project" "$_service" "  "
@@ -381,23 +456,30 @@ _print_dependency_graph() {
 }
 
 _print_all_dependency_graphs() {
-  local _project _printed
+  local _project _printed _header_printed
 
   [[ -z "$_graph_projects" ]] && return
+  _header_printed=false
   _printed=false
-  while IFS= read -r _project; do
+  while IFS= read -r _project || [[ -n "$_project" ]]; do
     [[ -z "$_project" ]] && continue
-    if ! echo "$_graph_edges" | grep -Fq "${_project}|" 2>/dev/null; then
+    if ! _graph_project_has_edges "$_project"; then
       continue
     fi
-    if [[ "$_printed" == false ]]; then
+    if [[ "$_header_printed" == false ]]; then
+      printf '\n─────────────────\n'
+      _header_printed=true
+    fi
+    if [[ "$_printed" == true ]]; then
       printf '\n'
-      _printed=true
     fi
     printf '%s── %s dependencies ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
     _print_dependency_graph "$_project"
-    printf '\n\n\n'
+    _printed=true
   done <<< "$_graph_projects"
+  if [[ "$_printed" == true ]]; then
+    printf '\n'
+  fi
 }
 
 _register_container_graph() {
