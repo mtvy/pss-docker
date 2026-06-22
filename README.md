@@ -150,6 +150,35 @@ Example output:
 
 Only shown when the container has the `com.docker.compose.project.working_dir` label (Compose V2). Plain `docker run` containers are skipped.
 
+### `dps -d`
+
+Show a dependency graph for each Docker Compose project after the cards (from `depends_on` labels):
+
+```bash
+dps -a -d
+```
+
+Example output:
+
+```
+┌infogram-frontend
+│     ...
+└─────────────────
+
+── infogram dependencies ──
+  elasticsearch  (infogram-es)
+        │
+        ▼
+  frontend  (infogram-frontend)
+```
+
+Use `-a` to include stopped containers in the graph. Combine with other flags:
+
+```bash
+dps -a -d -f infogram
+dps -l -d
+```
+
 ### `dps -m`
 
 Show container RAM usage below each card (from `docker stats`):
@@ -207,4 +236,5 @@ sudo rm /usr/local/bin/dps
 - `-mi` adds a `docker images` lookup for image disk sizes.
 - `-ls` adds a batch `docker inspect` call to read compose project labels.
 - `-ls` only works for containers started with Docker Compose V2 (`com.docker.compose.project.working_dir` label).
-- Other `docker ps` flags (beyond `-a`, `-f`, `-l`, `-ls`, `-m`, `-mi`, `-h`, `--help`) are not supported.
+- `-d` builds dependency graphs from the `com.docker.compose.depends_on` label (Compose V2); use `-a` for stopped services.
+- Other `docker ps` flags (beyond `-a`, `-f`, `-l`, `-ls`, `-d`, `-m`, `-mi`, `-h`, `--help`) are not supported.

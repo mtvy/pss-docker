@@ -14,6 +14,7 @@ Options:
   -f <name>       Filter by partial container name (substring match)
   -l              Compact card: name, ports (if any), and status only
   -ls             Show docker compose project directory below each card (if applicable)
+  -d              Show docker compose depends_on graph after the cards (one per project)
   -m              Show container RAM usage below each card (docker stats)
   -mi             Show RAM usage and image name with disk size below each card
   -h, --help      Show this help message and exit
@@ -24,6 +25,8 @@ Examples:
   ${_invocation} -f postgres       Containers whose name contains "postgres"
   ${_invocation} -l                Compact cards with name, ports, and status
   ${_invocation} -ls               Full cards with compose project directory
+  ${_invocation} -a -d             All containers with compose dependency graphs
+  ${_invocation} -a -d -f infogram Containers matching "infogram" with dependency graph
   ${_invocation} -l -m             Compact cards with memory usage below
   ${_invocation} -l -ls -mi        Compact cards with compose dir, memory, and image info
   ${_invocation} -a -f web -mi     All containers matching "web" with memory and image info
@@ -44,6 +47,7 @@ _filter=""
 _all=false
 _lite=false
 _show_compose_source=false
+_show_deps_graph=false
 _show_memory=false
 _show_image=false
 while [[ $# -gt 0 ]]; do
@@ -67,6 +71,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -ls)
       _show_compose_source=true
+      shift
+      ;;
+    -d)
+      _show_deps_graph=true
       shift
       ;;
     -l)
@@ -181,15 +189,241 @@ _lookup_image_info() {
   fi
 }
 
+_lookup_inspect_line() {
+  local _id="$1"
+  echo "$_inspect_data" | grep -F "${_id}|" | head -n1 || true
+}
+
 _lookup_compose_dir() {
   local _id="$1"
   local _line _dir
-  _line=$(echo "$_compose_data" | grep -F "${_id}|" | head -n1 || true)
+  _line=$(_lookup_inspect_line "$_id")
   if [[ -n "$_line" ]]; then
-    _dir="${_line#*|}"
+    _dir="${_line##*|}"
     if [[ -n "$_dir" ]]; then
       echo "$_dir"
     fi
+  fi
+}
+
+_graph_register_project() {
+  local _project="$1"
+  if [[ -z "$_project" ]]; then
+    return
+  fi
+  if echo "$_graph_projects" | grep -Fxq "$_project" 2>/dev/null; then
+    return
+  fi
+  if [[ -z "$_graph_projects" ]]; then
+    _graph_projects="$_project"
+  else
+    _graph_projects="${_graph_projects}"$'\n'"$_project"
+  fi
+}
+
+_graph_register_node() {
+  local _project="$1" _service="$2" _name="$3" _state="$4" _status="$5"
+  local _line _prefix
+  if [[ -z "$_project" || -z "$_service" ]]; then
+    return
+  fi
+  _line="${_project}|${_service}|${_name}|${_state}|${_status}"
+  _prefix="${_project}|${_service}|"
+  if [[ -n "$_graph_nodes" ]]; then
+    _graph_nodes=$(echo "$_graph_nodes" | grep -Fv "$_prefix" || true)
+  fi
+  if [[ -z "$_graph_nodes" ]]; then
+    _graph_nodes="$_line"
+  else
+    _graph_nodes="${_graph_nodes}"$'\n'"$_line"
+  fi
+}
+
+_graph_add_edge() {
+  local _project="$1" _from="$2" _to="$3"
+  local _line
+  if [[ -z "$_project" || -z "$_from" || -z "$_to" ]]; then
+    return
+  fi
+  _line="${_project}|${_from}|${_to}"
+  if echo "$_graph_edges" | grep -Fxq "$_line" 2>/dev/null; then
+    return
+  fi
+  if [[ -z "$_graph_edges" ]]; then
+    _graph_edges="$_line"
+  else
+    _graph_edges="${_graph_edges}"$'\n'"$_line"
+  fi
+}
+
+_graph_children() {
+  local _project="$1" _from="$2"
+  echo "$_graph_edges" | grep -F "${_project}|${_from}|" 2>/dev/null | while IFS='|' read -r _p _f _t; do
+    printf '%s\n' "$_t"
+  done
+}
+
+_graph_is_dependent() {
+  local _project="$1" _service="$2"
+  echo "$_graph_edges" | grep -F "${_project}|" 2>/dev/null | grep -Fq "|${_service}$"
+}
+
+_graph_all_services() {
+  local _project="$1"
+  {
+    echo "$_graph_nodes" | grep -F "${_project}|" 2>/dev/null | while IFS='|' read -r _p _s _n _st _stt; do
+      printf '%s\n' "$_s"
+    done
+    echo "$_graph_edges" | grep -F "${_project}|" 2>/dev/null | while IFS='|' read -r _p _f _t; do
+      printf '%s\n' "$_f"
+      printf '%s\n' "$_t"
+    done
+  } | grep -v '^$' | sort -u
+}
+
+_graph_print_node() {
+  local _project="$1" _service="$2" _indent="$3"
+  local _line _name _state _status _sc
+  _line=$(echo "$_graph_nodes" | grep -F "${_project}|${_service}|" 2>/dev/null | head -n1 || true)
+  _name=""
+  _state=""
+  _status=""
+  if [[ -n "$_line" ]]; then
+    _name=$(printf '%s' "$_line" | cut -d'|' -f3)
+    _state=$(printf '%s' "$_line" | cut -d'|' -f4)
+    _status=$(printf '%s' "$_line" | cut -d'|' -f5)
+  fi
+  _sc=$(_state_color_code "$_state" "$_status")
+  if [[ -n "$_name" ]]; then
+    printf '%s%s%s%s  (%s)\n' "$_indent" "$_sc" "$_service" "$_C_RESET" "$_name"
+  else
+    printf '%s%s%s%s\n' "$_indent" "$_C_LABEL" "$_service" "$_C_RESET"
+  fi
+}
+
+_graph_print_chain() {
+  local _project="$1" _service="$2" _indent="$3"
+  local _child _children _first _printed_child
+
+  if echo "$_graph_visited" | grep -Fxq "$_service" 2>/dev/null; then
+    printf '%s      %s(cycle: %s)%s\n' "$_indent" "$_C_YELLOW" "$_service" "$_C_RESET"
+    return
+  fi
+  if [[ -z "$_graph_visited" ]]; then
+    _graph_visited="$_service"
+  else
+    _graph_visited="${_graph_visited}"$'\n'"$_service"
+  fi
+
+  _graph_print_node "$_project" "$_service" "$_indent"
+  _children=$(_graph_children "$_project" "$_service")
+  _first=true
+  while IFS= read -r _child; do
+    [[ -z "$_child" ]] && continue
+    if [[ "$_first" == true ]]; then
+      printf '%s      │\n' "$_indent"
+      printf '%s      ▼\n' "$_indent"
+      _first=false
+    else
+      printf '\n'
+    fi
+    _graph_print_chain "$_project" "$_child" "$_indent"
+    _printed_child=true
+  done <<< "$_children"
+}
+
+_print_dependency_graph() {
+  local _project="$1"
+  local _service _roots _root_count _printed_root
+
+  _graph_visited=""
+  _roots=""
+  while IFS= read -r _service; do
+    [[ -z "$_service" ]] && continue
+    if ! _graph_is_dependent "$_project" "$_service"; then
+      if [[ -z "$_roots" ]]; then
+        _roots="$_service"
+      else
+        _roots="${_roots}"$'\n'"$_service"
+      fi
+    fi
+  done <<< "$(_graph_all_services "$_project")"
+
+  _root_count=0
+  _printed_root=false
+  while IFS= read -r _service; do
+    [[ -z "$_service" ]] && continue
+    _root_count=$((_root_count + 1))
+  done <<< "$_roots"
+
+  if [[ "$_root_count" -eq 0 ]]; then
+    while IFS= read -r _service; do
+      [[ -z "$_service" ]] && continue
+      if [[ "$_printed_root" == true ]]; then
+        printf '\n'
+      fi
+      _graph_visited=""
+      _graph_print_chain "$_project" "$_service" "  "
+      _printed_root=true
+    done <<< "$(_graph_all_services "$_project")"
+    return
+  fi
+
+  while IFS= read -r _service; do
+    [[ -z "$_service" ]] && continue
+    if [[ "$_printed_root" == true ]]; then
+      printf '\n'
+    fi
+    _graph_visited=""
+    _graph_print_chain "$_project" "$_service" "  "
+    _printed_root=true
+  done <<< "$_roots"
+}
+
+_print_all_dependency_graphs() {
+  local _project _printed
+
+  [[ -z "$_graph_projects" ]] && return
+  _printed=false
+  while IFS= read -r _project; do
+    [[ -z "$_project" ]] && continue
+    if ! echo "$_graph_edges" | grep -Fq "${_project}|" 2>/dev/null; then
+      continue
+    fi
+    if [[ "$_printed" == false ]]; then
+      printf '\n'
+      _printed=true
+    fi
+    printf '%s── %s dependencies ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+    _print_dependency_graph "$_project"
+    printf '\n\n\n'
+  done <<< "$_graph_projects"
+}
+
+_register_container_graph() {
+  local _id="$1" _names="$2" _state="$3" _status="$4"
+  local _meta _project _service _depends _dep _dep_svc
+
+  _meta=$(_lookup_inspect_line "$_id")
+  [[ -z "$_meta" ]] && return
+
+  _project=$(printf '%s' "$_meta" | cut -d'|' -f2)
+  _service=$(printf '%s' "$_meta" | cut -d'|' -f3)
+  _depends=$(printf '%s' "$_meta" | cut -d'|' -f4)
+  [[ -z "$_project" || -z "$_service" ]] && return
+
+  _graph_register_project "$_project"
+  _graph_register_node "$_project" "$_service" "$_names" "$_state" "$_status"
+
+  if [[ -n "$_depends" ]]; then
+    IFS=',' read -ra _dep_entries <<< "$_depends"
+    for _dep in "${_dep_entries[@]}"; do
+      _dep_svc="${_dep%%:*}"
+      if [[ -n "$_dep_svc" ]]; then
+        _graph_add_edge "$_project" "$_dep_svc" "$_service"
+        _graph_register_node "$_project" "$_dep_svc" "" "" ""
+      fi
+    done
   fi
 }
 
@@ -273,19 +507,19 @@ if [[ "$_show_memory" == true || "$_show_image" == true || "$_show_compose_sourc
   _need_extras=true
 fi
 
-# Fast path: full card, no extras
-if [[ "$_lite" == false && "$_need_extras" == false ]]; then
+# Fast path: full card, no extras, no dependency graph
+if [[ "$_lite" == false && "$_need_extras" == false && "$_show_deps_graph" == false ]]; then
   "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
   exit 0
 fi
 
-# Fast path: lite card, no extras
-if [[ "$_lite" == true && "$_need_extras" == false ]]; then
+# Fast path: lite card, no extras, no dependency graph
+if [[ "$_lite" == true && "$_need_extras" == false && "$_show_deps_graph" == false ]]; then
   "${_docker_ps_cmd[@]}" --format "$_docker_ps_lite_fmt"
   exit 0
 fi
 
-# Extended path: extras and/or lite with extras
+# Extended path: extras, dependency graph, and/or lite with extras
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then
   _stats_data=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null || true)
@@ -296,12 +530,15 @@ if [[ "$_show_image" == true ]]; then
   _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
 fi
 
-_compose_data=""
-if [[ "$_show_compose_source" == true ]]; then
+_inspect_data=""
+_graph_projects=""
+_graph_nodes=""
+_graph_edges=""
+if [[ "$_show_compose_source" == true || "$_show_deps_graph" == true ]]; then
   _container_ids=$("${_docker_ps_cmd[@]}" -q 2>/dev/null || true)
   if [[ -n "$_container_ids" ]]; then
     # shellcheck disable=SC2086
-    _compose_data=$(docker inspect --format '{{printf "%.12s" .ID}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
+    _inspect_data=$(docker inspect --format '{{printf "%.12s" .ID}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.depends_on"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
   fi
 fi
 
@@ -324,9 +561,18 @@ while IFS= read -r _line; do
   _size="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
   _networks="${_rest}"
   [[ -z "$_names" ]] && continue
+
+  if [[ "$_show_deps_graph" == true ]]; then
+    _register_container_graph "$_id" "$_names" "$_state" "$_status"
+  fi
+
   if [[ "$_lite" == true ]]; then
     _print_card_lite "$_names" "$_ports" "$_state" "$_status" "$_id" "$_image"
   else
     _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
   fi
 done <<< "$_ps_output"
+
+if [[ "$_show_deps_graph" == true ]]; then
+  _print_all_dependency_graphs
+fi
