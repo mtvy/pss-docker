@@ -375,7 +375,7 @@ _graph_arrow_for_child() {
 
 _graph_print_chain() {
   local _project="$1" _service="$2" _indent="$3"
-  local _child _children _first _child_total _child_index _arrow
+  local _child _children _child_total _child_index _arrow
 
   if echo "$_graph_visited" | grep -Fxq "$_service" 2>/dev/null; then
     printf '%s      %s↔ (cycle: %s)%s\n' "$_indent" "$_C_YELLOW" "$_service" "$_C_RESET"
@@ -391,17 +391,10 @@ _graph_print_chain() {
   _children=$(_graph_children "$_project" "$_service")
   _child_total=$(_graph_count_lines "$_children")
   _child_index=0
-  _first=true
   while IFS= read -r _child; do
     [[ -z "$_child" ]] && continue
     _arrow=$(_graph_arrow_for_child "$_child_total" "$_child_index")
-    if [[ "$_first" == true ]]; then
-      printf '%s      %s\n' "$_indent" "$_arrow"
-      _first=false
-    else
-      printf '\n'
-      printf '%s      %s\n' "$_indent" "$_arrow"
-    fi
+    printf '%s      %s\n' "$_indent" "$_arrow"
     _graph_print_chain "$_project" "$_child" "$_indent"
     _child_index=$((_child_index + 1))
   done <<< "$_children"
