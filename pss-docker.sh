@@ -216,7 +216,7 @@ _print_extras() {
     fi
   fi
 
-  if [[ "$_show_image" == true ]]; then
+  if [[ "$_show_image" == true || "$_show_compose_source" == true ]]; then
     printf '\n'
   fi
 }
