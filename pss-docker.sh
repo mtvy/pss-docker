@@ -5,6 +5,7 @@ set -euo pipefail
 _dps_debug_log() {
   [[ "${DPS_DEBUG:-}" == 1 ]] || return 0
   local _log="${DPS_DEBUG_LOG:-/Users/mtvy/code/other/psss-docker/.cursor/debug-e302a5.log}"
+  mkdir -p "$(dirname "$_log")" 2>/dev/null || true
   local _hyp="$1" _loc="$2" _msg="$3"
   shift 3
   local _data="$*"
@@ -28,24 +29,30 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# ANSI color names (resolved in printf format strings)
-_color_for_state() {
+# ANSI colors — basic 8-color palette (36/32/31/33) for broad terminal support
+_C_RESET=$'\033[0m'
+_C_LABEL=$'\033[36m'
+_C_GREEN=$'\033[32m'
+_C_RED=$'\033[31m'
+_C_YELLOW=$'\033[33m'
+
+_state_color_code() {
   local _state _status _state_lc
   _state="$1"
   _status="$2"
   _state_lc=$(printf '%s' "$_state" | tr '[:upper:]' '[:lower:]')
 
   case "$_state_lc" in
-    running) echo green; return ;;
-    exited)  echo red; return ;;
+    running) printf '%s' "$_C_GREEN"; return ;;
+    exited)  printf '%s' "$_C_RED"; return ;;
   esac
 
   case "$_status" in
-    Up*)     echo green; return ;;
-    Exited*) echo red; return ;;
+    Up*)     printf '%s' "$_C_GREEN"; return ;;
+    Exited*) printf '%s' "$_C_RED"; return ;;
   esac
 
-  echo yellow
+  printf '%s' "$_C_YELLOW"
 }
 
 _invocation="${0##*/}"
@@ -92,20 +99,20 @@ _dps_debug_log "H2" "pss-docker.sh:startup" "env_and_tty" \
 #endregion
 
 # Shared card format (fast path: docker ps --format)
-_state_fmt='{{if eq .State "running"}}{{"\033[92m"}}{{else if eq .State "exited"}}{{"\033[91m"}}{{else}}{{"\033[93m"}}{{end}}'
+_state_fmt='{{if eq .State "running"}}{{"\033[32m"}}{{else if eq .State "exited"}}{{"\033[31m"}}{{else}}{{"\033[33m"}}{{end}}'
 _docker_ps_fmt='
 ┌'"$_state_fmt"'{{.Names}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Image{{"\033[0m"}}]      {{.Image}}
-│     [{{"\033[96m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-│     [{{"\033[96m"}}ID{{"\033[0m"}}]         {{.ID}}
-│     [{{"\033[96m"}}Command{{"\033[0m"}}]    {{.Command}}
-│     [{{"\033[96m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
-│     [{{"\033[96m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
-│     [{{"\033[96m"}}State{{"\033[0m"}}]      '"$_state_fmt"'{{.State}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
-│     [{{"\033[96m"}}Size{{"\033[0m"}}]       {{.Size}}
-│     [{{"\033[96m"}}Names{{"\033[0m"}}]      {{.Names}}
-│     [{{"\033[96m"}}Networks{{"\033[0m"}}]   {{.Networks}}
+│     [{{"\033[36m"}}Image{{"\033[0m"}}]      {{.Image}}
+│     [{{"\033[36m"}}Ports{{"\033[0m"}}]      {{.Ports}}
+│     [{{"\033[36m"}}ID{{"\033[0m"}}]         {{.ID}}
+│     [{{"\033[36m"}}Command{{"\033[0m"}}]    {{.Command}}
+│     [{{"\033[36m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
+│     [{{"\033[36m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
+│     [{{"\033[36m"}}State{{"\033[0m"}}]      '"$_state_fmt"'{{.State}}{{"\033[0m"}}
+│     [{{"\033[36m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
+│     [{{"\033[36m"}}Size{{"\033[0m"}}]       {{.Size}}
+│     [{{"\033[36m"}}Names{{"\033[0m"}}]      {{.Names}}
+│     [{{"\033[36m"}}Networks{{"\033[0m"}}]   {{.Networks}}
 └─────────────────\n'
 
 _lookup_memory() {
@@ -149,65 +156,36 @@ _lookup_image_info() {
 _print_card() {
   local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
-  local _color
-  _color=$(_color_for_state "$_state" "$_status")
+  local _sc
+  _sc=$(_state_color_code "$_state" "$_status")
 
   #region agent log
   if [[ "${DPS_DEBUG:-}" == 1 ]]; then
     local _hdr
-    case "$_color" in
-      green) _hdr=$(printf '┌\033[92m%s\033[0m\n' "$_names") ;;
-      red)   _hdr=$(printf '┌\033[91m%s\033[0m\n' "$_names") ;;
-      *)     _hdr=$(printf '┌\033[93m%s\033[0m\n' "$_names") ;;
-    esac
+    _hdr=$(printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET")
     _dps_debug_log "H3" "pss-docker.sh:_print_card" "printf_header" \
-      "\"color\":\"${_color}\",\"state\":\"${_state}\",\"status\":\"${_status}\",\"has_esc\":$(_dps_has_esc "$_hdr"),\"hex\":\"$(_dps_esc_hex "$_hdr")\""
+      "\"runId\":\"post-fix\",\"color_scheme\":\"basic\",\"state\":\"${_state}\",\"status\":\"${_status}\",\"has_esc\":$(_dps_has_esc "$_hdr"),\"hex\":\"$(_dps_esc_hex "$_hdr")\""
   fi
   #endregion
 
-  case "$_color" in
-    green)
-      printf '┌\033[92m%s\033[0m\n' "$_names"
-      ;;
-    red)
-      printf '┌\033[91m%s\033[0m\n' "$_names"
-      ;;
-    *)
-      printf '┌\033[93m%s\033[0m\n' "$_names"
-      ;;
-  esac
-
-  printf '│     [\033[96mImage\033[0m]      %s\n' "$_image"
-  printf '│     [\033[96mPorts\033[0m]      %s\n' "$_ports"
-  printf '│     [\033[96mID\033[0m]         %s\n' "$_id"
-  printf '│     [\033[96mCommand\033[0m]    %s\n' "$_command"
-  printf '│     [\033[96mCreatedAt\033[0m]  %s\n' "$_created_at"
-  printf '│     [\033[96mRunningFor\033[0m] %s\n' "$_running_for"
-
-  case "$_color" in
-    green)
-      printf '│     [\033[96mState\033[0m]      \033[92m%s\033[0m\n' "$_state"
-      printf '│     [\033[96mStatus\033[0m]     \033[92m%s\033[0m\n' "$_status"
-      ;;
-    red)
-      printf '│     [\033[96mState\033[0m]      \033[91m%s\033[0m\n' "$_state"
-      printf '│     [\033[96mStatus\033[0m]     \033[91m%s\033[0m\n' "$_status"
-      ;;
-    *)
-      printf '│     [\033[96mState\033[0m]      \033[93m%s\033[0m\n' "$_state"
-      printf '│     [\033[96mStatus\033[0m]     \033[93m%s\033[0m\n' "$_status"
-      ;;
-  esac
-
-  printf '│     [\033[96mSize\033[0m]       %s\n' "$_size"
-  printf '│     [\033[96mNames\033[0m]      %s\n' "$_names"
-  printf '│     [\033[96mNetworks\033[0m]   %s\n' "$_networks"
+  printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET"
+  printf '│     [%sImage%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_image"
+  printf '│     [%sPorts%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
+  printf '│     [%sID%s]         %s\n' "$_C_LABEL" "$_C_RESET" "$_id"
+  printf '│     [%sCommand%s]    %s\n' "$_C_LABEL" "$_C_RESET" "$_command"
+  printf '│     [%sCreatedAt%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_created_at"
+  printf '│     [%sRunningFor%s] %s\n' "$_C_LABEL" "$_C_RESET" "$_running_for"
+  printf '│     [%sState%s]      %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_state" "$_C_RESET"
+  printf '│     [%sStatus%s]     %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
+  printf '│     [%sSize%s]       %s\n' "$_C_LABEL" "$_C_RESET" "$_size"
+  printf '│     [%sNames%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_names"
+  printf '│     [%sNetworks%s]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
   printf '└─────────────────\n'
 
   if [[ "$_show_memory" == true ]]; then
     local _mem
     _mem=$(_lookup_memory "$_names")
-    printf '  ↳ [\033[96mMemory\033[0m]  %s\n' "$_mem"
+    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
   fi
 
   if [[ "$_show_image" == true ]]; then
@@ -215,7 +193,7 @@ _print_card() {
     _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    printf '  ↳ [\033[96mImage\033[0m]  %s  (%s)\n\n' "$_img_tag" "$_img_size"
+    printf '  ↳ [%sImage%s]  %s  (%s)\n\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
   fi
 }
 
@@ -236,7 +214,7 @@ if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
     _sample=$(printf '%s' "$_out" | head -n 1)
     #region agent log
     _dps_debug_log "H1" "pss-docker.sh:fast_path" "docker_template_output" \
-      "\"has_esc\":$(_dps_has_esc "$_sample"),\"hex\":\"$(_dps_esc_hex "$_sample")\",\"literal_backslash\":$( [[ "$_sample" == *'\\033'* ]] && echo true || echo false)"
+      "\"runId\":\"post-fix\",\"color_scheme\":\"basic\",\"has_esc\":$(_dps_has_esc "$_sample"),\"hex\":\"$(_dps_esc_hex "$_sample")\",\"literal_backslash\":$( [[ "$_sample" == *'\\033'* ]] && echo true || echo false)"
     _dps_debug_log "H4" "pss-docker.sh:fast_path" "state_fmt_snippet" \
       "\"state_fmt\":\"$(printf '%s' "$_state_fmt" | tr '"' "'")\""
     #endregion
