@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+#region agent log
+_dps_debug_log() {
+  [[ "${DPS_DEBUG:-}" == 1 ]] || return 0
+  local _log="${DPS_DEBUG_LOG:-/Users/mtvy/code/other/psss-docker/.cursor/debug-e302a5.log}"
+  local _hyp="$1" _loc="$2" _msg="$3"
+  shift 3
+  local _data="$*"
+  local _ts
+  _ts=$(($(date +%s) * 1000))
+  printf '{"sessionId":"e302a5","hypothesisId":"%s","location":"%s","message":"%s","data":{%s},"timestamp":%s}\n' \
+    "$_hyp" "$_loc" "$_msg" "$_data" "$_ts" >> "$_log" 2>/dev/null || true
+}
+
+_dps_has_esc() {
+  [[ "$1" == *$'\033'* ]] && echo true || echo false
+}
+
+_dps_esc_hex() {
+  printf '%s' "$1" | head -c 80 | od -An -tx1 2>/dev/null | tr -d '\n ' | head -c 120 || echo "n/a"
+}
+#endregion
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is not installed or not on PATH" >&2
   exit 1
@@ -64,6 +86,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+#region agent log
+_dps_debug_log "H2" "pss-docker.sh:startup" "env_and_tty" \
+  "\"TERM\":\"${TERM:-}\",\"NO_COLOR\":\"${NO_COLOR:-}\",\"tty_stdout\":$([ -t 1 ] && echo true || echo false),\"show_memory\":${_show_memory},\"show_image\":${_show_image},\"all\":${_all}"
+#endregion
+
 # Shared card format (fast path: docker ps --format)
 _state_fmt='{{if eq .State "running"}}{{"\033[92m"}}{{else if eq .State "exited"}}{{"\033[91m"}}{{else}}{{"\033[93m"}}{{end}}'
 _docker_ps_fmt='
@@ -124,6 +151,19 @@ _print_card() {
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
   local _color
   _color=$(_color_for_state "$_state" "$_status")
+
+  #region agent log
+  if [[ "${DPS_DEBUG:-}" == 1 ]]; then
+    local _hdr
+    case "$_color" in
+      green) _hdr=$(printf '┌\033[92m%s\033[0m\n' "$_names") ;;
+      red)   _hdr=$(printf '┌\033[91m%s\033[0m\n' "$_names") ;;
+      *)     _hdr=$(printf '┌\033[93m%s\033[0m\n' "$_names") ;;
+    esac
+    _dps_debug_log "H3" "pss-docker.sh:_print_card" "printf_header" \
+      "\"color\":\"${_color}\",\"state\":\"${_state}\",\"status\":\"${_status}\",\"has_esc\":$(_dps_has_esc "$_hdr"),\"hex\":\"$(_dps_esc_hex "$_hdr")\""
+  fi
+  #endregion
 
   case "$_color" in
     green)
@@ -190,9 +230,26 @@ fi
 
 # Fast path: no memory/image extras
 if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
-  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
+  if [[ "${DPS_DEBUG:-}" == 1 ]]; then
+    local _out _sample
+    _out=$("${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt")
+    _sample=$(printf '%s' "$_out" | head -n 1)
+    #region agent log
+    _dps_debug_log "H1" "pss-docker.sh:fast_path" "docker_template_output" \
+      "\"has_esc\":$(_dps_has_esc "$_sample"),\"hex\":\"$(_dps_esc_hex "$_sample")\",\"literal_backslash\":$( [[ "$_sample" == *'\\033'* ]] && echo true || echo false)"
+    _dps_debug_log "H4" "pss-docker.sh:fast_path" "state_fmt_snippet" \
+      "\"state_fmt\":\"$(printf '%s' "$_state_fmt" | tr '"' "'")\""
+    #endregion
+    printf '%s' "$_out"
+  else
+    "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
+  fi
   exit 0
 fi
+
+#region agent log
+_dps_debug_log "H5" "pss-docker.sh:extended_path" "branch" "\"path\":\"extended\""
+#endregion
 
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then
