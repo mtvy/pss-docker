@@ -301,7 +301,7 @@ if [[ "$_show_compose_source" == true ]]; then
   _container_ids=$("${_docker_ps_cmd[@]}" -q 2>/dev/null || true)
   if [[ -n "$_container_ids" ]]; then
     # shellcheck disable=SC2086
-    _compose_data=$(docker inspect --format '{{.ID}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
+    _compose_data=$(docker inspect --format '{{printf "%.12s" .ID}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
   fi
 fi
 
