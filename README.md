@@ -106,6 +106,50 @@ dps -a -f web
 
 List all containers (including stopped) whose names contain "web".
 
+### `dps -l`
+
+Compact card with only the container name, ports (if any), and status:
+
+```bash
+dps -l
+```
+
+Example output:
+
+```
+┌webserver-1
+│     [Ports]      0.0.0.0:80->80/tcp
+│     [Status]     Up 2 hours
+└─────────────────
+```
+
+The `-l` flag does not disable other extra fields — combine with `-m`, `-mi`, or `-ls` to show memory, image info, or compose directory below the compact card.
+
+```bash
+dps -l -m
+dps -l -ls -mi
+```
+
+### `dps -ls`
+
+Show the docker compose project directory below each card (for containers started via Docker Compose):
+
+```bash
+dps -ls
+```
+
+Example output:
+
+```
+┌paperless-webserver-1
+│     [Image]      ghcr.io/paperless-ngx/paperless-ngx:dev
+│     ...
+└─────────────────
+  ↳ [Source]  /home/user/projects/paperless
+```
+
+Only shown when the container has the `com.docker.compose.project.working_dir` label (Compose V2). Plain `docker run` containers are skipped.
+
 ### `dps -m`
 
 Show container RAM usage below each card (from `docker stats`):
@@ -161,4 +205,6 @@ sudo rm /usr/local/bin/dps
 
 - `-m` / `-mi` require an extra `docker stats` call; memory is only available for running containers.
 - `-mi` adds a `docker images` lookup for image disk sizes.
-- Other `docker ps` flags (beyond `-a`, `-f`, `-m`, `-mi`, `-h`, `--help`) are not supported.
+- `-ls` adds a batch `docker inspect` call to read compose project labels.
+- `-ls` only works for containers started with Docker Compose V2 (`com.docker.compose.project.working_dir` label).
+- Other `docker ps` flags (beyond `-a`, `-f`, `-l`, `-ls`, `-m`, `-mi`, `-h`, `--help`) are not supported.

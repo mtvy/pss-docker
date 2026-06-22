@@ -12,6 +12,8 @@ Colorized, card-style docker ps output — a readable alternative to the default
 Options:
   -a              Show all containers (including stopped), like docker ps -a
   -f <name>       Filter by partial container name (substring match)
+  -l              Compact card: name, ports (if any), and status only
+  -ls             Show docker compose project directory below each card (if applicable)
   -m              Show container RAM usage below each card (docker stats)
   -mi             Show RAM usage and image name with disk size below each card
   -h, --help      Show this help message and exit
@@ -20,7 +22,10 @@ Examples:
   ${_invocation}                   List running containers
   ${_invocation} -a                List all containers
   ${_invocation} -f postgres       Containers whose name contains "postgres"
-  ${_invocation} -m                Running containers with memory usage
+  ${_invocation} -l                Compact cards with name, ports, and status
+  ${_invocation} -ls               Full cards with compose project directory
+  ${_invocation} -l -m             Compact cards with memory usage below
+  ${_invocation} -l -ls -mi        Compact cards with compose dir, memory, and image info
   ${_invocation} -a -f web -mi     All containers matching "web" with memory and image info
 
 Color coding:
@@ -34,9 +39,11 @@ Requirements:
 EOF
 }
 
-# Parse arguments: -f <filter>  -a (all)  -m (memory)  -mi (memory + image size)
+# Parse arguments
 _filter=""
 _all=false
+_lite=false
+_show_compose_source=false
 _show_memory=false
 _show_image=false
 while [[ $# -gt 0 ]]; do
@@ -56,6 +63,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     -a)
       _all=true
+      shift
+      ;;
+    -ls)
+      _show_compose_source=true
+      shift
+      ;;
+    -l)
+      _lite=true
       shift
       ;;
     -mi)
@@ -122,6 +137,12 @@ _docker_ps_fmt='
 │     [{{"\033[36m"}}Networks{{"\033[0m"}}]   {{.Networks}}
 └─────────────────\n'
 
+_docker_ps_lite_fmt='
+┌'"$_state_fmt"'{{.Names}}{{"\033[0m"}}
+{{if .Ports}}│     [{{"\033[36m"}}Ports{{"\033[0m"}}]      {{.Ports}}
+{{end}}│     [{{"\033[36m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
+└─────────────────\n'
+
 _lookup_memory() {
   local _name="$1"
   local _line
@@ -160,6 +181,61 @@ _lookup_image_info() {
   fi
 }
 
+_lookup_compose_dir() {
+  local _id="$1"
+  local _line _dir
+  _line=$(echo "$_compose_data" | grep -F "${_id}|" | head -n1 || true)
+  if [[ -n "$_line" ]]; then
+    _dir="${_line#*|}"
+    if [[ -n "$_dir" ]]; then
+      echo "$_dir"
+    fi
+  fi
+}
+
+_print_extras() {
+  local _names="$1" _id="$2" _image="$3"
+  local _compose_dir _mem _img_info _img_tag _img_size
+
+  if [[ "$_show_memory" == true ]]; then
+    _mem=$(_lookup_memory "$_names")
+    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
+  fi
+
+  if [[ "$_show_image" == true ]]; then
+    _img_info=$(_lookup_image_info "$_id" "$_image")
+    _img_tag="${_img_info%%|*}"
+    _img_size="${_img_info##*|}"
+    printf '  ↳ [%sImage%s]  %s  (%s)\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
+  fi
+
+  if [[ "$_show_compose_source" == true ]]; then
+    _compose_dir=$(_lookup_compose_dir "$_id")
+    if [[ -n "$_compose_dir" ]]; then
+      printf '  ↳ [%sSource%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_compose_dir"
+    fi
+  fi
+
+  if [[ "$_show_image" == true ]]; then
+    printf '\n'
+  fi
+}
+
+_print_card_lite() {
+  local _names="$1" _ports="$2" _state="$3" _status="$4" _id="$5" _image="$6"
+  local _sc
+  _sc=$(_state_color_code "$_state" "$_status")
+
+  printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET"
+  if [[ -n "$_ports" ]]; then
+    printf '│     [%sPorts%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
+  fi
+  printf '│     [%sStatus%s]     %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
+  printf '└─────────────────\n'
+
+  _print_extras "$_names" "$_id" "$_image"
+}
+
 _print_card() {
   local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
@@ -180,19 +256,7 @@ _print_card() {
   printf '│     [%sNetworks%s]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
   printf '└─────────────────\n'
 
-  if [[ "$_show_memory" == true ]]; then
-    local _mem
-    _mem=$(_lookup_memory "$_names")
-    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
-  fi
-
-  if [[ "$_show_image" == true ]]; then
-    local _img_info _img_tag _img_size
-    _img_info=$(_lookup_image_info "$_id" "$_image")
-    _img_tag="${_img_info%%|*}"
-    _img_size="${_img_info##*|}"
-    printf '  ↳ [%sImage%s]  %s  (%s)\n\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
-  fi
+  _print_extras "$_names" "$_id" "$_image"
 }
 
 # Build docker ps command with optional flags
@@ -204,12 +268,24 @@ if [[ -n "$_filter" ]]; then
   _docker_ps_cmd+=(--filter "name=$_filter")
 fi
 
-# Fast path: no memory/image extras
-if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
+_need_extras=false
+if [[ "$_show_memory" == true || "$_show_image" == true || "$_show_compose_source" == true ]]; then
+  _need_extras=true
+fi
+
+# Fast path: full card, no extras
+if [[ "$_lite" == false && "$_need_extras" == false ]]; then
   "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
   exit 0
 fi
 
+# Fast path: lite card, no extras
+if [[ "$_lite" == true && "$_need_extras" == false ]]; then
+  "${_docker_ps_cmd[@]}" --format "$_docker_ps_lite_fmt"
+  exit 0
+fi
+
+# Extended path: extras and/or lite with extras
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then
   _stats_data=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null || true)
@@ -218,6 +294,15 @@ fi
 _images_data=""
 if [[ "$_show_image" == true ]]; then
   _images_data=$(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}' 2>/dev/null || true)
+fi
+
+_compose_data=""
+if [[ "$_show_compose_source" == true ]]; then
+  _container_ids=$("${_docker_ps_cmd[@]}" -q 2>/dev/null || true)
+  if [[ -n "$_container_ids" ]]; then
+    # shellcheck disable=SC2086
+    _compose_data=$(docker inspect --format '{{.ID}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
+  fi
 fi
 
 _ps_sep='|||'
@@ -239,5 +324,9 @@ while IFS= read -r _line; do
   _size="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
   _networks="${_rest}"
   [[ -z "$_names" ]] && continue
-  _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
+  if [[ "$_lite" == true ]]; then
+    _print_card_lite "$_names" "$_ports" "$_state" "$_status" "$_id" "$_image"
+  else
+    _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
+  fi
 done <<< "$_ps_output"
