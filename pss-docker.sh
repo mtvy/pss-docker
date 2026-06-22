@@ -1,28 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-#region agent log
-_dps_debug_log() {
-  [[ "${DPS_DEBUG:-}" == 1 ]] || return 0
-  local _log="${DPS_DEBUG_LOG:-/Users/mtvy/code/other/psss-docker/.cursor/debug-e302a5.log}"
-  mkdir -p "$(dirname "$_log")" 2>/dev/null || true
-  local _hyp="$1" _loc="$2" _msg="$3"
-  shift 3
-  local _data="$*"
-  local _ts
-  _ts=$(($(date +%s) * 1000))
-  printf '{"sessionId":"e302a5","hypothesisId":"%s","location":"%s","message":"%s","data":{%s},"timestamp":%s}\n' \
-    "$_hyp" "$_loc" "$_msg" "$_data" "$_ts" >> "$_log" 2>/dev/null || true
+_invocation="${0##*/}"
+
+_show_help() {
+  cat <<EOF
+Usage: ${_invocation} [OPTIONS]
+
+Colorized, card-style docker ps output — a readable alternative to the default flat table.
+
+Options:
+  -a              Show all containers (including stopped), like docker ps -a
+  -f <name>       Filter by partial container name (substring match)
+  -m              Show container RAM usage below each card (docker stats)
+  -mi             Show RAM usage and image name with disk size below each card
+  -h, --help      Show this help message and exit
+
+Examples:
+  ${_invocation}                   List running containers
+  ${_invocation} -a                List all containers
+  ${_invocation} -f postgres       Containers whose name contains "postgres"
+  ${_invocation} -m                Running containers with memory usage
+  ${_invocation} -a -f web -mi     All containers matching "web" with memory and image info
+
+Color coding:
+  Green   running / Up*
+  Red     exited / Exited*
+  Yellow  other states (paused, restarting, etc.)
+  Cyan    field labels ([Image], [Ports], ...)
+
+Requirements:
+  Bash 3+, Docker CLI on PATH, terminal with ANSI color support.
+EOF
 }
 
-_dps_has_esc() {
-  [[ "$1" == *$'\033'* ]] && echo true || echo false
-}
-
-_dps_esc_hex() {
-  printf '%s' "$1" | head -c 80 | od -An -tx1 2>/dev/null | tr -d '\n ' | head -c 120 || echo "n/a"
-}
-#endregion
+# Parse arguments: -f <filter>  -a (all)  -m (memory)  -mi (memory + image size)
+_filter=""
+_all=false
+_show_memory=false
+_show_image=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      _show_help
+      exit 0
+      ;;
+    -f)
+      if [[ $# -ge 2 ]]; then
+        _filter="$2"
+        shift 2
+      else
+        echo "${_invocation}: -f requires a value" >&2
+        exit 1
+      fi
+      ;;
+    -a)
+      _all=true
+      shift
+      ;;
+    -mi)
+      _show_memory=true
+      _show_image=true
+      shift
+      ;;
+    -m)
+      _show_memory=true
+      shift
+      ;;
+    *)
+      echo "${_invocation}: unknown argument '$1'" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is not installed or not on PATH" >&2
@@ -54,49 +104,6 @@ _state_color_code() {
 
   printf '%s' "$_C_YELLOW"
 }
-
-_invocation="${0##*/}"
-
-# Parse arguments: -f <filter>  -a (all)  -m (memory)  -mi (memory + image size)
-_filter=""
-_all=false
-_show_memory=false
-_show_image=false
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -f)
-      if [[ $# -ge 2 ]]; then
-        _filter="$2"
-        shift 2
-      else
-        echo "${_invocation}: -f requires a value" >&2
-        exit 1
-      fi
-      ;;
-    -a)
-      _all=true
-      shift
-      ;;
-    -mi)
-      _show_memory=true
-      _show_image=true
-      shift
-      ;;
-    -m)
-      _show_memory=true
-      shift
-      ;;
-    *)
-      echo "${_invocation}: unknown argument '$1'" >&2
-      exit 1
-      ;;
-  esac
-done
-
-#region agent log
-_dps_debug_log "H2" "pss-docker.sh:startup" "env_and_tty" \
-  "\"TERM\":\"${TERM:-}\",\"NO_COLOR\":\"${NO_COLOR:-}\",\"tty_stdout\":$([ -t 1 ] && echo true || echo false),\"show_memory\":${_show_memory},\"show_image\":${_show_image},\"all\":${_all}"
-#endregion
 
 # Shared card format (fast path: docker ps --format)
 _state_fmt='{{if eq .State "running"}}{{"\033[32m"}}{{else if eq .State "exited"}}{{"\033[31m"}}{{else}}{{"\033[33m"}}{{end}}'
@@ -159,15 +166,6 @@ _print_card() {
   local _sc
   _sc=$(_state_color_code "$_state" "$_status")
 
-  #region agent log
-  if [[ "${DPS_DEBUG:-}" == 1 ]]; then
-    local _hdr
-    _hdr=$(printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET")
-    _dps_debug_log "H3" "pss-docker.sh:_print_card" "printf_header" \
-      "\"runId\":\"post-fix\",\"color_scheme\":\"basic\",\"state\":\"${_state}\",\"status\":\"${_status}\",\"has_esc\":$(_dps_has_esc "$_hdr"),\"hex\":\"$(_dps_esc_hex "$_hdr")\""
-  fi
-  #endregion
-
   printf '┌%s%s%s\n' "$_sc" "$_names" "$_C_RESET"
   printf '│     [%sImage%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_image"
   printf '│     [%sPorts%s]      %s\n' "$_C_LABEL" "$_C_RESET" "$_ports"
@@ -208,26 +206,9 @@ fi
 
 # Fast path: no memory/image extras
 if [[ "$_show_memory" == false && "$_show_image" == false ]]; then
-  if [[ "${DPS_DEBUG:-}" == 1 ]]; then
-    local _out _sample
-    _out=$("${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt")
-    _sample=$(printf '%s' "$_out" | head -n 1)
-    #region agent log
-    _dps_debug_log "H1" "pss-docker.sh:fast_path" "docker_template_output" \
-      "\"runId\":\"post-fix\",\"color_scheme\":\"basic\",\"has_esc\":$(_dps_has_esc "$_sample"),\"hex\":\"$(_dps_esc_hex "$_sample")\",\"literal_backslash\":$( [[ "$_sample" == *'\\033'* ]] && echo true || echo false)"
-    _dps_debug_log "H4" "pss-docker.sh:fast_path" "state_fmt_snippet" \
-      "\"state_fmt\":\"$(printf '%s' "$_state_fmt" | tr '"' "'")\""
-    #endregion
-    printf '%s' "$_out"
-  else
-    "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
-  fi
+  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
   exit 0
 fi
-
-#region agent log
-_dps_debug_log "H5" "pss-docker.sh:extended_path" "branch" "\"path\":\"extended\""
-#endregion
 
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then

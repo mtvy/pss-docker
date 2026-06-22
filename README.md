@@ -33,8 +33,8 @@ Each running container is rendered as a vertical card:
 
 | Field      | Color            |
 |------------|------------------|
-| Container name (header) | Yellow (`\033[93m`) |
-| Labels (Image, Ports, …) | Cyan (`\033[96m`) |
+| Container name (header) | Green / Red / Yellow by state |
+| Labels (Image, Ports, …) | Cyan (`\033[36m`) |
 
 ### Template fields
 
@@ -45,7 +45,7 @@ The Go template exposes all standard `docker ps` fields: `Names`, `Image`, `Port
 ### One-command install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh | sudo tee /usr/local/bin/d-ps >/dev/null && sudo chmod 0755 /usr/local/bin/d-ps
+curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh | sudo tee /usr/local/bin/dps >/dev/null && sudo chmod 0755 /usr/local/bin/dps
 ```
 
 > **Why `tee` and not `cat >`?** BSD `install` (macOS) cannot read from `/dev/stdin`; `tee` works on both Linux and macOS.
@@ -54,67 +54,74 @@ curl -fsSL https://raw.githubusercontent.com/mtvy/pss-docker/main/pss-docker.sh 
 
 ```bash
 chmod +x pss-docker.sh
-sudo install -m 0755 pss-docker.sh /usr/local/bin/d-ps
+sudo install -m 0755 pss-docker.sh /usr/local/bin/dps
 ```
 
 ### Notes
 
 - Requires `sudo` to write into `/usr/local/bin`.
 - Ensure Docker is installed and your user can run it (on Linux, add yourself to the `docker` group if needed).
-- The script installs as `d-ps` on `PATH`.
+- The script installs as `dps` on `PATH`.
 
 ## Usage
 
-### `d-ps`
+Show help:
+
+```bash
+dps -h
+dps --help
+```
+
+### `dps`
 
 List all running containers with card-style formatting:
 
 ```bash
-d-ps
+dps
 ```
 
-### `d-ps -f <filter>`
+### `dps -f <filter>`
 
 Filter containers by partial name (case-insensitive):
 
 ```bash
-d-ps -f postgres
+dps -f postgres
 ```
 
 This will match containers like `db-postgres-1`, `postgres-4`, etc.
 
-### `d-ps -a`
+### `dps -a`
 
 Show all containers (including stopped ones), equivalent to `docker ps -a`:
 
 ```bash
-d-ps -a
+dps -a
 ```
 
 ### Combined flags
 
 ```bash
-d-ps -a -f web
+dps -a -f web
 ```
 
 List all containers (including stopped) whose names contain "web".
 
-### `d-ps -m`
+### `dps -m`
 
-Show container RAM usage (from `docker stats`) inside each card:
+Show container RAM usage below each card (from `docker stats`):
 
 ```bash
-d-ps -m
+dps -m
 ```
 
-Adds a `[Memory]` field after `[Ports]`, e.g. `512MiB / 2GiB`. Stopped containers show `-`.
+Stopped containers show `-` for memory.
 
-### `d-ps -mi`
+### `dps -mi`
 
 Show RAM usage plus image name and disk size below each card:
 
 ```bash
-d-ps -mi
+dps -mi
 ```
 
 Example output:
@@ -122,17 +129,16 @@ Example output:
 ```
 ┌paperless-webserver-1
 │     [Image]      ghcr.io/paperless-ngx/paperless-ngx:dev
-│     [Ports]      0.0.0.0:8000->8000/tcp
-│     [Memory]     512MiB / 2GiB
 │     ...
 └─────────────────
+  ↳ [Memory]  512MiB / 2GiB
   ↳ [Image]  ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
 ```
 
 Combine with other flags:
 
 ```bash
-d-ps -a -f web -mi
+dps -a -f web -mi
 ```
 
 ## Update
@@ -142,7 +148,7 @@ Re-run the install command; it overwrites the installed binary.
 ## Uninstall
 
 ```bash
-sudo rm /usr/local/bin/d-ps
+sudo rm /usr/local/bin/dps
 ```
 
 ## Requirements
@@ -155,4 +161,4 @@ sudo rm /usr/local/bin/d-ps
 
 - `-m` / `-mi` require an extra `docker stats` call; memory is only available for running containers.
 - `-mi` adds a `docker images` lookup for image disk sizes.
-- Other `docker ps` flags (beyond `-a`, `-f`, `-m`, `-mi`) are not supported.
+- Other `docker ps` flags (beyond `-a`, `-f`, `-m`, `-mi`, `-h`, `--help`) are not supported.
