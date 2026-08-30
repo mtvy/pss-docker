@@ -151,7 +151,7 @@ dps -l
 
 ### `dps -ls`
 
-Show the docker compose project directory below each entry (for containers started via Docker Compose):
+Show the docker compose project directory once on the project group header (Compose V2 `working_dir` label):
 
 ```bash
 dps -ls
@@ -160,13 +160,13 @@ dps -ls
 Example output:
 
 ```
-┌paperless
+┌paperless · /home/user/projects/paperless
 │ webserver   0.0.0.0:8000->8000/tcp  Up 2 hours
-│   ↳ [Source]  /home/user/projects/paperless
+│ db          5432/tcp                Up 2 hours
 └─────────────────────────────────────────────
 ```
 
-Only shown when the container has the `com.docker.compose.project.working_dir` label (Compose V2). Plain `docker run` containers are skipped.
+Plain `docker run` containers (no compose project) still show Source under the card when present.
 
 ### `dps -d`
 
@@ -250,10 +250,13 @@ dps -mi
 Example output:
 
 ```
-┌paperless
+┌paperless · /home/user/projects/paperless
 │ webserver   0.0.0.0:8000->8000/tcp  Up 2 hours
-│   ↳ [Memory]  512MiB / 2GiB
-│   ↳ [Image]  ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
+│   ↳ Memory  512MiB / 2GiB
+│   ↳ Image   ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
+│ db          5432/tcp                Up 2 hours
+│   ↳ Memory  64MiB / 2GiB
+│   ↳ Image   postgres:16  (150MB)
 └─────────────────────────────────────────────
 ```
 
@@ -285,6 +288,6 @@ sudo rm /usr/local/bin/dps
 - Default output always batch-inspects containers to resolve Compose project labels (needed for grouping).
 - `-m` / `-mi` require an extra `docker stats` call; memory is only available for running containers.
 - `-mi` adds a `docker images` lookup for image disk sizes.
-- `-ls` only works for containers started with Docker Compose V2 (`com.docker.compose.project.working_dir` label).
+- `-ls` shows compose `working_dir` once on the project header (Compose V2 label); non-compose cards still print Source under the card.
 - `-d` prints `depends_on` trees (Compose V2 label); only edge participants are shown; use `-a` for stopped services.
 - Other `docker ps` flags (beyond `-a`, `-f`, `-l`, `-v`, `-ls`, `-d`, `-m`, `-mi`, `-h`, `--help`) are not supported.

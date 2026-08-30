@@ -782,34 +782,39 @@ _register_container_graph() {
 _print_extras() {
   local _names="$1" _id="$2" _image="$3"
   local _prefix="${4:-  }"
+  local _skip_source="${5:-false}"
   local _compose_dir _mem _img_info _img_tag _img_size
 
   if [[ "$_show_memory" == true ]]; then
     _mem=$(_lookup_memory "$_names")
-    printf '%s↳ [%sMemory%s]  %s\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_mem"
+    printf '%s↳ %s%-6s%s  %s\n' "$_prefix" "$_C_LABEL" "Memory" "$_C_RESET" "$_mem"
   fi
 
   if [[ "$_show_image" == true ]]; then
     _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    printf '%s↳ [%sImage%s]  %s  (%s)\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
+    printf '%s↳ %s%-6s%s  %s  (%s)\n' "$_prefix" "$_C_LABEL" "Image" "$_C_RESET" "$_img_tag" "$_img_size"
   fi
 
-  if [[ "$_show_compose_source" == true ]]; then
+  if [[ "$_show_compose_source" == true && "$_skip_source" != true ]]; then
     _compose_dir=$(_lookup_compose_dir "$_id")
     if [[ -n "$_compose_dir" ]]; then
-      printf '%s↳ [%sSource%s]  %s\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_compose_dir"
+      printf '%s↳ %s%-6s%s  %s\n' "$_prefix" "$_C_LABEL" "Source" "$_C_RESET" "$_compose_dir"
     fi
   fi
 
-  if [[ "$_show_image" == true || "$_show_compose_source" == true ]]; then
-    printf '\n'
+  # Blank line after standalone card extras (not inside project groups)
+  if [[ "$_skip_source" != true ]]; then
+    if [[ "$_show_image" == true || "$_show_compose_source" == true ]]; then
+      printf '\n'
+    fi
   fi
 }
 
 _print_card_lite() {
   local _names="$1" _ports="$2" _state="$3" _status="$4" _id="$5" _image="$6"
+  local _skip_source="${7:-false}"
   local _sc
   _sc=$(_state_color_code "$_state" "$_status")
 
@@ -820,12 +825,13 @@ _print_card_lite() {
   printf '│     [%sStatus%s]     %s%s%s\n' "$_C_LABEL" "$_C_RESET" "$_sc" "$_status" "$_C_RESET"
   printf '└─────────────────\n'
 
-  _print_extras "$_names" "$_id" "$_image"
+  _print_extras "$_names" "$_id" "$_image" "  " "$_skip_source"
 }
 
 _print_card() {
   local _names="$1" _image="$2" _ports="$3" _id="$4" _command="$5"
   local _created_at="$6" _running_for="$7" _state="$8" _status="$9" _size="${10}" _networks="${11}"
+  local _skip_source="${12:-false}"
   local _sc
   _sc=$(_state_color_code "$_state" "$_status")
 
@@ -843,7 +849,7 @@ _print_card() {
   printf '│     [%sNetworks%s]   %s\n' "$_C_LABEL" "$_C_RESET" "$_networks"
   printf '└─────────────────\n'
 
-  _print_extras "$_names" "$_id" "$_image"
+  _print_extras "$_names" "$_id" "$_image" "  " "$_skip_source"
 }
 
 _str_len() {
@@ -880,8 +886,12 @@ _service_label() {
 }
 
 _print_project_header() {
-  local _project="$1"
-  printf '%s── %s ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+  local _project="$1" _path="${2:-}"
+  if [[ -n "$_path" ]]; then
+    printf '%s── %s%s · %s\n' "$_C_LABEL" "$_project" "$_C_RESET" "$_path"
+  else
+    printf '%s── %s ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+  fi
 }
 
 _project_records() {
@@ -900,9 +910,24 @@ _project_records() {
   printf '%s' "$_out"
 }
 
+_project_compose_dir() {
+  local _project="$1" _rec _dir
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    if [[ "$_c_project" == "$_project" ]]; then
+      _dir=$(_lookup_compose_dir "$_c_id")
+      if [[ -n "$_dir" ]]; then
+        printf '%s' "$_dir"
+        return
+      fi
+    fi
+  done <<< "$_containers_data"
+}
+
 _print_project_group_lite() {
   local _project="$1"
-  local _recs _rec _svc _ports_disp _sc
+  local _recs _rec _svc _ports_disp _sc _src=""
   local _svc_w=0 _ports_w=0 _len _rule_w _i
 
   _recs=$(_project_records "$_project")
@@ -938,7 +963,19 @@ _print_project_group_lite() {
     _rule_w=17
   fi
 
-  printf '┌%s%s%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+  if [[ "$_show_compose_source" == true ]]; then
+    _src=$(_project_compose_dir "$_project")
+  fi
+  if [[ -n "$_src" ]]; then
+    printf '┌%s%s%s · %s\n' "$_C_LABEL" "$_project" "$_C_RESET" "$_src"
+    _len=$((1 + $(_str_len "$_project") + 3 + $(_str_len "$_src")))
+    if [[ "$_len" -gt "$_rule_w" ]]; then
+      _rule_w="$_len"
+    fi
+  else
+    printf '┌%s%s%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+  fi
+
   while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
     [[ -z "${_rec:-}" ]] && continue
     _parse_container_record "$_rec"
@@ -949,7 +986,7 @@ _print_project_group_lite() {
       "$_sc" "$_svc_w" "$_svc" "$_C_RESET" \
       "$_ports_w" "$_ports_disp" \
       "$_sc" "$_c_status" "$_C_RESET"
-    _print_extras "$_c_names" "$_c_id" "$_c_image" "│   "
+    _print_extras "$_c_names" "$_c_id" "$_c_image" "│   " true
   done <<< "$_recs"
   printf '└'
   _i=0
@@ -983,11 +1020,13 @@ _parse_container_record() {
 
 _print_container_entry() {
   # Non-compose lite cards, or verbose full cards (with optional project header outside).
+  # $1 = skip_source (true when Source already shown on project header)
+  local _skip_source="${1:-false}"
   if [[ "$_lite" == true ]]; then
-    _print_card_lite "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
+    _print_card_lite "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image" "$_skip_source"
   else
     _print_card "$_c_names" "$_c_image" "$_c_ports" "$_c_id" "$_c_command" \
-      "$_c_created_at" "$_c_running_for" "$_c_state" "$_c_status" "$_c_size" "$_c_networks"
+      "$_c_created_at" "$_c_running_for" "$_c_state" "$_c_status" "$_c_size" "$_c_networks" "$_skip_source"
   fi
 }
 
@@ -1074,12 +1113,16 @@ while IFS= read -r _project || [[ -n "${_project:-}" ]]; do
   if [[ "$_lite" == true ]]; then
     _print_project_group_lite "$_project"
   else
-    _print_project_header "$_project"
+    _src=""
+    if [[ "$_show_compose_source" == true ]]; then
+      _src=$(_project_compose_dir "$_project")
+    fi
+    _print_project_header "$_project" "$_src"
     while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
       [[ -z "${_rec:-}" ]] && continue
       _parse_container_record "$_rec"
       if [[ "$_c_project" == "$_project" ]]; then
-        _print_container_entry
+        _print_container_entry true
       fi
     done <<< "$_containers_data"
   fi
