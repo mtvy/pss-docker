@@ -8,34 +8,36 @@ _show_help() {
 Usage: ${_invocation} [OPTIONS]
 
 Colorized, card-style docker ps output — a readable alternative to the default flat table.
+By default shows compact output grouped by Docker Compose project.
 
 Options:
   -a              Show all containers (including stopped), like docker ps -a
   -f <name>       Filter by partial container name (substring match)
-  -l              Compact card: name, ports (if any), and status only
-  -ls             Show docker compose project directory below each card (if applicable)
+  -l              Compact output (default; accepted for compatibility)
+  -v              Full cards (Image, Ports, ID, Command, …)
+  -ls             Show docker compose project directory below each entry (if applicable)
   -d              Show docker compose depends_on graph after the cards (one per project)
-  -m              Show container RAM usage below each card (docker stats)
-  -mi             Show RAM usage and image name with disk size below each card
+  -m              Show container RAM usage below each entry (docker stats)
+  -mi             Show RAM usage and image name with disk size below each entry
   -h, --help      Show this help message and exit
 
 Examples:
-  ${_invocation}                   List running containers
-  ${_invocation} -a                List all containers
+  ${_invocation}                   Compact list, grouped by compose project
+  ${_invocation} -a                All containers (including stopped)
   ${_invocation} -f postgres       Containers whose name contains "postgres"
-  ${_invocation} -l                Compact cards with name, ports, and status
-  ${_invocation} -ls               Full cards with compose project directory
+  ${_invocation} -v                Full cards, still grouped by project
+  ${_invocation} -ls               Compact list with compose project directory
   ${_invocation} -a -d             All containers with compose dependency graphs
   ${_invocation} -a -d -f infogram Containers matching "infogram" with dependency graph
-  ${_invocation} -l -m             Compact cards with memory usage below
-  ${_invocation} -l -ls -mi        Compact cards with compose dir, memory, and image info
+  ${_invocation} -m                Compact list with memory usage below
+  ${_invocation} -ls -mi           Compact list with compose dir, memory, and image info
   ${_invocation} -a -f web -mi     All containers matching "web" with memory and image info
 
 Color coding:
   Green   running / Up*
   Red     exited / Exited*
   Yellow  other states (paused, restarting, etc.)
-  Cyan    field labels ([Image], [Ports], ...)
+  Cyan    field labels ([Image], [Ports], ...) and project headers
 
 Requirements:
   Bash 3+, Docker CLI on PATH, terminal with ANSI color support.
@@ -45,7 +47,7 @@ EOF
 # Parse arguments
 _filter=""
 _all=false
-_lite=false
+_lite=true
 _show_compose_source=false
 _show_deps_graph=false
 _show_memory=false
@@ -78,7 +80,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -l)
+      # Default mode; kept for compatibility
       _lite=true
+      shift
+      ;;
+    -v)
+      _lite=false
       shift
       ;;
     -mi)
@@ -128,29 +135,6 @@ _state_color_code() {
   printf '%s' "$_C_YELLOW"
 }
 
-# Shared card format (fast path: docker ps --format)
-_state_fmt='{{if eq .State "running"}}{{"\033[32m"}}{{else if eq .State "exited"}}{{"\033[31m"}}{{else}}{{"\033[33m"}}{{end}}'
-_docker_ps_fmt='
-┌'"$_state_fmt"'{{.Names}}{{"\033[0m"}}
-│     [{{"\033[36m"}}Image{{"\033[0m"}}]      {{.Image}}
-│     [{{"\033[36m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-│     [{{"\033[36m"}}ID{{"\033[0m"}}]         {{.ID}}
-│     [{{"\033[36m"}}Command{{"\033[0m"}}]    {{.Command}}
-│     [{{"\033[36m"}}CreatedAt{{"\033[0m"}}]  {{.CreatedAt}}
-│     [{{"\033[36m"}}RunningFor{{"\033[0m"}}] {{.RunningFor}}
-│     [{{"\033[36m"}}State{{"\033[0m"}}]      '"$_state_fmt"'{{.State}}{{"\033[0m"}}
-│     [{{"\033[36m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
-│     [{{"\033[36m"}}Size{{"\033[0m"}}]       {{.Size}}
-│     [{{"\033[36m"}}Names{{"\033[0m"}}]      {{.Names}}
-│     [{{"\033[36m"}}Networks{{"\033[0m"}}]   {{.Networks}}
-└─────────────────\n'
-
-_docker_ps_lite_fmt='
-┌'"$_state_fmt"'{{.Names}}{{"\033[0m"}}
-{{if .Ports}}│     [{{"\033[36m"}}Ports{{"\033[0m"}}]      {{.Ports}}
-{{end}}│     [{{"\033[36m"}}Status{{"\033[0m"}}]     '"$_state_fmt"'{{.Status}}{{"\033[0m"}}
-└─────────────────\n'
-
 _lookup_memory() {
   local _name="$1"
   local _line
@@ -194,6 +178,20 @@ _lookup_inspect_line() {
   echo "$_inspect_data" | grep -F "${_id}|" | head -n1 || true
 }
 
+_lookup_compose_meta() {
+  # Prints: project|service  (empty project if not compose)
+  local _id="$1"
+  local _line _project _service
+  _line=$(_lookup_inspect_line "$_id")
+  if [[ -z "$_line" ]]; then
+    printf '|'
+    return
+  fi
+  _project=$(printf '%s' "$_line" | cut -d'|' -f2)
+  _service=$(printf '%s' "$_line" | cut -d'|' -f3)
+  printf '%s|%s' "$_project" "$_service"
+}
+
 _lookup_compose_dir() {
   local _id="$1"
   local _line _dir
@@ -203,6 +201,21 @@ _lookup_compose_dir() {
     if [[ -n "$_dir" ]]; then
       echo "$_dir"
     fi
+  fi
+}
+
+_register_display_project() {
+  local _project="$1"
+  if [[ -z "$_project" ]]; then
+    return
+  fi
+  if echo "$_display_projects" | grep -Fxq "$_project" 2>/dev/null; then
+    return
+  fi
+  if [[ -z "$_display_projects" ]]; then
+    _display_projects="$_project"
+  else
+    _display_projects="${_display_projects}"$'\n'"$_project"
   fi
 }
 
@@ -558,6 +571,73 @@ _print_card() {
   _print_extras "$_names" "$_id" "$_image"
 }
 
+_print_project_header() {
+  local _project="$1"
+  printf '%s── %s ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+}
+
+_print_grouped_lite_line() {
+  local _service="$1" _names="$2" _ports="$3" _state="$4" _status="$5" _id="$6" _image="$7"
+  local _sc _label _ports_disp
+  _sc=$(_state_color_code "$_state" "$_status")
+
+  if [[ -n "$_service" ]]; then
+    _label="$_service"
+  else
+    _label="$_names"
+  fi
+
+  if [[ -n "$_ports" ]]; then
+    _ports_disp="$_ports"
+  else
+    _ports_disp="-"
+  fi
+
+  if [[ -n "$_service" && "$_service" != "$_names" ]]; then
+    printf '  %s%s%s  (%s)  %s  %s%s%s\n' \
+      "$_sc" "$_label" "$_C_RESET" "$_names" "$_ports_disp" "$_sc" "$_status" "$_C_RESET"
+  else
+    printf '  %s%s%s  %s  %s%s%s\n' \
+      "$_sc" "$_label" "$_C_RESET" "$_ports_disp" "$_sc" "$_status" "$_C_RESET"
+  fi
+
+  _print_extras "$_names" "$_id" "$_image"
+}
+
+_parse_container_record() {
+  # Sets globals from a stored record (|||-separated).
+  # Fields: project, service, names, image, ports, id, command, created_at,
+  #         running_for, state, status, size, networks
+  local _rec="$1"
+  _c_project="${_rec%%$_ps_sep*}"
+  _rest="${_rec#*$_ps_sep}"
+  _c_service="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_names="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_image="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_ports="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_id="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_command="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_created_at="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_running_for="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_state="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_status="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_size="${_rest%%$_ps_sep*}"; _rest="${_rest#*$_ps_sep}"
+  _c_networks="${_rest}"
+}
+
+_print_container_entry() {
+  if [[ "$_lite" == true ]]; then
+    if [[ -n "$_c_project" ]]; then
+      _print_grouped_lite_line "$_c_service" "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
+    else
+      _print_card_lite "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
+    fi
+  else
+    _print_card "$_c_names" "$_c_image" "$_c_ports" "$_c_id" "$_c_command" \
+      "$_c_created_at" "$_c_running_for" "$_c_state" "$_c_status" "$_c_size" "$_c_networks"
+  fi
+}
+
 # Build docker ps command with optional flags
 _docker_ps_cmd=(docker ps)
 if [[ "$_all" == true ]]; then
@@ -567,24 +647,6 @@ if [[ -n "$_filter" ]]; then
   _docker_ps_cmd+=(--filter "name=$_filter")
 fi
 
-_need_extras=false
-if [[ "$_show_memory" == true || "$_show_image" == true || "$_show_compose_source" == true ]]; then
-  _need_extras=true
-fi
-
-# Fast path: full card, no extras, no dependency graph
-if [[ "$_lite" == false && "$_need_extras" == false && "$_show_deps_graph" == false ]]; then
-  "${_docker_ps_cmd[@]}" --format "$_docker_ps_fmt"
-  exit 0
-fi
-
-# Fast path: lite card, no extras, no dependency graph
-if [[ "$_lite" == true && "$_need_extras" == false && "$_show_deps_graph" == false ]]; then
-  "${_docker_ps_cmd[@]}" --format "$_docker_ps_lite_fmt"
-  exit 0
-fi
-
-# Extended path: extras, dependency graph, and/or lite with extras
 _stats_data=""
 if [[ "$_show_memory" == true ]]; then
   _stats_data=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null || true)
@@ -599,18 +661,20 @@ _inspect_data=""
 _graph_projects=""
 _graph_nodes=""
 _graph_edges=""
-if [[ "$_show_compose_source" == true || "$_show_deps_graph" == true ]]; then
-  _container_ids=$("${_docker_ps_cmd[@]}" -q 2>/dev/null || true)
-  if [[ -n "$_container_ids" ]]; then
-    # shellcheck disable=SC2086
-    _inspect_data=$(docker inspect --format '{{printf "%.12s" .ID}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.depends_on"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
-  fi
+_display_projects=""
+_containers_data=""
+
+_container_ids=$("${_docker_ps_cmd[@]}" -q 2>/dev/null || true)
+if [[ -n "$_container_ids" ]]; then
+  # shellcheck disable=SC2086
+  _inspect_data=$(docker inspect --format '{{printf "%.12s" .ID}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.depends_on"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $_container_ids 2>/dev/null || true)
 fi
 
 _ps_sep='|||'
 _ps_pipe_fmt='{{.Names}}|||{{.Image}}|||{{.Ports}}|||{{.ID}}|||{{.Command}}|||{{.CreatedAt}}|||{{.RunningFor}}|||{{.State}}|||{{.Status}}|||{{.Size}}|||{{.Networks}}'
 _ps_output=$("${_docker_ps_cmd[@]}" --format "$_ps_pipe_fmt")
 
+# Collect containers with compose metadata
 while IFS= read -r _line; do
   [[ -z "$_line" ]] && continue
   _names="${_line%%$_ps_sep*}"
@@ -627,16 +691,66 @@ while IFS= read -r _line; do
   _networks="${_rest}"
   [[ -z "$_names" ]] && continue
 
+  _meta=$(_lookup_compose_meta "$_id")
+  _project="${_meta%%|*}"
+  _service="${_meta#*|}"
+
   if [[ "$_show_deps_graph" == true ]]; then
     _register_container_graph "$_id" "$_names" "$_state" "$_status"
   fi
 
-  if [[ "$_lite" == true ]]; then
-    _print_card_lite "$_names" "$_ports" "$_state" "$_status" "$_id" "$_image"
+  if [[ -n "$_project" ]]; then
+    _register_display_project "$_project"
+  fi
+
+  _rec="${_project}${_ps_sep}${_service}${_ps_sep}${_names}${_ps_sep}${_image}${_ps_sep}${_ports}${_ps_sep}${_id}${_ps_sep}${_command}${_ps_sep}${_created_at}${_ps_sep}${_running_for}${_ps_sep}${_state}${_ps_sep}${_status}${_ps_sep}${_size}${_ps_sep}${_networks}"
+  if [[ -z "$_containers_data" ]]; then
+    _containers_data="$_rec"
   else
-    _print_card "$_names" "$_image" "$_ports" "$_id" "$_command" "$_created_at" "$_running_for" "$_state" "$_status" "$_size" "$_networks"
+    _containers_data="${_containers_data}"$'\n'"$_rec"
   fi
 done <<< "$_ps_output"
+
+# Render: compose projects first (grouped), then non-compose containers
+_printed_any=false
+while IFS= read -r _project || [[ -n "${_project:-}" ]]; do
+  [[ -z "${_project:-}" ]] && continue
+  if [[ "$_printed_any" == true ]]; then
+    printf '\n'
+  fi
+  _print_project_header "$_project"
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    if [[ "$_c_project" == "$_project" ]]; then
+      _print_container_entry
+    fi
+  done <<< "$_containers_data"
+  _printed_any=true
+done <<< "$_display_projects"
+
+_has_non_compose=false
+while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+  [[ -z "${_rec:-}" ]] && continue
+  _parse_container_record "$_rec"
+  if [[ -z "$_c_project" ]]; then
+    _has_non_compose=true
+    break
+  fi
+done <<< "$_containers_data"
+
+if [[ "$_has_non_compose" == true ]]; then
+  if [[ "$_printed_any" == true ]]; then
+    printf '\n'
+  fi
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    if [[ -z "$_c_project" ]]; then
+      _print_container_entry
+    fi
+  done <<< "$_containers_data"
+fi
 
 if [[ "$_show_deps_graph" == true ]]; then
   _print_all_dependency_graphs
