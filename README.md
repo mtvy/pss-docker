@@ -170,7 +170,7 @@ Only shown when the container has the `com.docker.compose.project.working_dir` l
 
 ### `dps -d`
 
-Show a dependency graph for each Docker Compose project after the list (from `depends_on` labels):
+Show a `depends_on` tree for each Docker Compose project after the list (only services that participate in a dependency edge):
 
 ```bash
 dps -a -d
@@ -179,17 +179,28 @@ dps -a -d
 Example output:
 
 ```
-┌infogram
-│ frontend   …  Up 2 hours
-└──────────────────────────
-
-── infogram dependencies ──
-  elasticsearch  (infogram-es)
-      ↓
-  frontend  (infogram-frontend)
+┌infogram · depends_on
+│ elasticsearch          Up 2 hours
+│ └─ frontend            Up 2 hours
+└────────────────────────────────────
 ```
 
-Use `-a` to include stopped containers in the graph. Combine with other flags:
+Branching and conditions (`service_healthy` / `service_completed_successfully`):
+
+```
+┌app · depends_on
+│ db                     Up 1 hour
+│ ├─ api                 Up 1 hour
+│ └─ worker              Up 1 hour  [healthy]
+└────────────────────────────────────
+
+┌qwen · depends_on
+│ prepare                [completed]
+│ └─ single              Up 1 hour
+└────────────────────────────────────
+```
+
+Standalone services without `depends_on` are omitted from this section (they already appear in the main list). Use `-a` to include stopped containers. Combine with other flags:
 
 ```bash
 dps -a -d -f infogram
@@ -253,5 +264,5 @@ sudo rm /usr/local/bin/dps
 - `-m` / `-mi` require an extra `docker stats` call; memory is only available for running containers.
 - `-mi` adds a `docker images` lookup for image disk sizes.
 - `-ls` only works for containers started with Docker Compose V2 (`com.docker.compose.project.working_dir` label).
-- `-d` builds dependency graphs from the `com.docker.compose.depends_on` label (Compose V2); use `-a` for stopped services.
+- `-d` prints `depends_on` trees (Compose V2 label); only edge participants are shown; use `-a` for stopped services.
 - Other `docker ps` flags (beyond `-a`, `-f`, `-l`, `-v`, `-ls`, `-d`, `-m`, `-mi`, `-h`, `--help`) are not supported.
