@@ -185,6 +185,28 @@ Example output:
 └────────────────────────────────────
 ```
 
+Shared dependencies (same service reached from another branch) get a cyan `[shared]` tag — the subtree is not repeated:
+
+```
+┌server · depends_on
+│ node-exporter            Up 25 hours
+│ └─ prometheus            Up 25 hours
+│    └─ grafana            Up 25 hours
+│
+│ nvidia-gpu-exporter      Up 25 hours
+│ └─ prometheus            Up 25 hours  [shared]
+└──────────────────────────────────────────────
+```
+
+Real `depends_on` cycles are drawn as a closed mini-frame (not `↔ cycle:`):
+
+```
+│ └─ ╭─ ml-speech ⇄ ml-presentation ─╮
+│    │  ml-speech         Up 25 hours │
+│    │  ml-presentation   Up 25 hours │
+│    ╰────────────────────────────────╯
+```
+
 Branching and conditions (`service_healthy` / `service_completed_successfully`):
 
 ```

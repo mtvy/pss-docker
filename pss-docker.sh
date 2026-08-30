@@ -387,8 +387,44 @@ _graph_count_lines() {
   printf '%d' "$_n"
 }
 
+_graph_path_has() {
+  [[ -n "$_graph_path" ]] && echo "$_graph_path" | grep -Fxq "$1" 2>/dev/null
+}
+
+_graph_path_push() {
+  if [[ -z "$_graph_path" ]]; then
+    _graph_path="$1"
+  else
+    _graph_path="${_graph_path}"$'\n'"$1"
+  fi
+}
+
+_graph_path_pop() {
+  if [[ "$_graph_path" != *$'\n'* ]]; then
+    _graph_path=""
+  else
+    _graph_path="${_graph_path%$'\n'*}"
+  fi
+}
+
+_graph_done_has() {
+  [[ -n "$_graph_done" ]] && echo "$_graph_done" | grep -Fxq "$1" 2>/dev/null
+}
+
+_graph_done_add() {
+  local _s="$1"
+  if _graph_done_has "$_s"; then
+    return
+  fi
+  if [[ -z "$_graph_done" ]]; then
+    _graph_done="$_s"
+  else
+    _graph_done="${_graph_done}"$'\n'"$_s"
+  fi
+}
+
 _graph_node_status_text() {
-  # Prints: color_code|plain_text  (color may be empty → use default label)
+  # Prints: color_code|plain_text
   local _project="$1" _service="$2"
   local _line _name _state _status _cond _tag
   _line=$(_graph_find_node_line "$_project" "$_service")
@@ -416,6 +452,7 @@ _graph_node_status_text() {
 _graph_print_tree_node() {
   local _project="$1" _service="$2" _indent="$3" _connector="$4" _svc_w="$5"
   local _parent="${6:-}"
+  local _shared="${7:-false}"
   local _sc _stext _cond _tag
   _sc=$(_graph_node_status_text "$_project" "$_service")
   _stext="${_sc#*|}"
@@ -427,10 +464,149 @@ _graph_print_tree_node() {
       _stext="${_stext}  ${_tag}"
     fi
   fi
-  printf '│ %s%s%s%-*s%s  %s%s%s\n' \
+  printf '│ %s%s%s%-*s%s  %s%s%s' \
     "$_indent" "$_connector" \
     "$_sc" "$_svc_w" "$_service" "$_C_RESET" \
     "$_sc" "$_stext" "$_C_RESET"
+  if [[ "$_shared" == true ]]; then
+    printf '  %s[shared]%s' "$_C_LABEL" "$_C_RESET"
+  fi
+  printf '\n'
+}
+
+_graph_cycle_members_from_path() {
+  # Print members from back-edge target through end of path (newline-separated)
+  local _target="$1" _s _started=false
+  while IFS= read -r _s || [[ -n "${_s:-}" ]]; do
+    [[ -z "${_s:-}" ]] && continue
+    if [[ "$_s" == "$_target" ]]; then
+      _started=true
+    fi
+    if [[ "$_started" == true ]]; then
+      printf '%s\n' "$_s"
+    fi
+  done <<< "$_graph_path"
+}
+
+_graph_print_cycle_ring() {
+  local _project="$1" _target="$2" _indent="$3" _connector="$4" _svc_w="$5"
+  local _members _s _count=0 _chain="" _header _pad
+  local _sc _stext _name_w=0 _status_w=0 _inner_w=0 _line_w _i _hlen _len
+  local _all_done=true _a _b _fill
+
+  _members=$(_graph_cycle_members_from_path "$_target")
+  if [[ -z "$_members" ]]; then
+    _graph_print_tree_node "$_project" "$_target" "$_indent" "$_connector" "$_svc_w" "" true
+    return
+  fi
+
+  while IFS= read -r _s || [[ -n "${_s:-}" ]]; do
+    [[ -z "${_s:-}" ]] && continue
+    _count=$((_count + 1))
+    if ! _graph_done_has "$_s"; then
+      _all_done=false
+    fi
+    _len=$(_str_len "$_s")
+    if [[ "$_len" -gt "$_name_w" ]]; then
+      _name_w="$_len"
+    fi
+    _sc=$(_graph_node_status_text "$_project" "$_s")
+    _stext="${_sc#*|}"
+    _len=$(_str_len "$_stext")
+    if [[ "$_len" -gt "$_status_w" ]]; then
+      _status_w="$_len"
+    fi
+  done <<< "$_members"
+
+  if [[ "$_all_done" == true ]]; then
+    _graph_print_tree_node "$_project" "$_target" "$_indent" "$_connector" "$_svc_w" "" true
+    return
+  fi
+
+  if [[ "$_name_w" -lt "$_svc_w" ]]; then
+    _name_w="$_svc_w"
+  fi
+
+  if [[ "$_count" -eq 2 ]]; then
+    _a=$(printf '%s\n' "$_members" | sed -n '1p')
+    _b=$(printf '%s\n' "$_members" | sed -n '2p')
+    _chain="${_a} ⇄ ${_b}"
+    _header="╭─ ${_chain} ─╮"
+  else
+    _chain=""
+    while IFS= read -r _s || [[ -n "${_s:-}" ]]; do
+      [[ -z "${_s:-}" ]] && continue
+      if [[ -z "$_chain" ]]; then
+        _chain="$_s"
+      else
+        _chain="${_chain} → ${_s}"
+      fi
+    done <<< "$_members"
+    _header="╭→ ${_chain} ╮"
+  fi
+
+  _hlen=$(_str_len "$_header")
+  # content row: "|  name  status |" ≈ 1+2+name+2+status+1
+  _line_w=$((4 + _name_w + 2 + _status_w + 1))
+  _inner_w="$_hlen"
+  if [[ "$_line_w" -gt "$_inner_w" ]]; then
+    _inner_w="$_line_w"
+  fi
+  if [[ "$_inner_w" -lt 12 ]]; then
+    _inner_w=12
+  fi
+
+  # Widen header with ─ before the closing corner if content is wider
+  if [[ "$_inner_w" -gt "$_hlen" ]]; then
+    _fill=$((_inner_w - _hlen))
+    if [[ "$_count" -eq 2 ]]; then
+      _header="╭─ ${_chain} "
+      _i=0
+      while [[ "$_i" -lt "$_fill" ]]; do
+        _header="${_header}─"
+        _i=$((_i + 1))
+      done
+      _header="${_header}╮"
+    else
+      _header="╭→ ${_chain} "
+      _i=0
+      while [[ "$_i" -lt "$_fill" ]]; do
+        _header="${_header}─"
+        _i=$((_i + 1))
+      done
+      _header="${_header}╮"
+    fi
+    _inner_w=$(_str_len "$_header")
+  fi
+
+  if [[ -n "$_connector" ]]; then
+    _pad="${_indent}   "
+  else
+    _pad="$_indent"
+  fi
+
+  printf '│ %s%s%s%s%s\n' "$_indent" "$_connector" "$_C_YELLOW" "$_header" "$_C_RESET"
+
+  while IFS= read -r _s || [[ -n "${_s:-}" ]]; do
+    [[ -z "${_s:-}" ]] && continue
+    _sc=$(_graph_node_status_text "$_project" "$_s")
+    _stext="${_sc#*|}"
+    _sc="${_sc%%|*}"
+    printf '│ %s%s│  %s%-*s%s  %s%-*s%s %s│%s\n' \
+      "$_pad" "$_C_YELLOW" \
+      "$_sc" "$_name_w" "$_s" "$_C_RESET" \
+      "$_sc" "$_status_w" "$_stext" "$_C_RESET" \
+      "$_C_YELLOW" "$_C_RESET"
+    _graph_done_add "$_s"
+  done <<< "$_members"
+
+  printf '│ %s%s╰' "$_pad" "$_C_YELLOW"
+  _i=2
+  while [[ "$_i" -lt "$_inner_w" ]]; do
+    printf '─'
+    _i=$((_i + 1))
+  done
+  printf '╯%s\n' "$_C_RESET"
 }
 
 _graph_print_tree() {
@@ -442,18 +618,20 @@ _graph_print_tree() {
   local _child _children _child_total _child_index _is_last
   local _next_indent _next_conn
 
-  if echo "$_graph_visited" | grep -Fxq "$_service" 2>/dev/null; then
-    printf '│ %s%s%s↔ cycle: %s%s\n' \
-      "$_indent" "$_connector" "$_C_YELLOW" "$_service" "$_C_RESET"
+  # True cycle: back-edge to ancestor on current path
+  if _graph_path_has "$_service"; then
+    _graph_print_cycle_ring "$_project" "$_service" "$_indent" "$_connector" "$_svc_w"
     return
   fi
-  if [[ -z "$_graph_visited" ]]; then
-    _graph_visited="$_service"
-  else
-    _graph_visited="${_graph_visited}"$'\n'"$_service"
+
+  # Shared: already fully rendered in another branch
+  if _graph_done_has "$_service"; then
+    _graph_print_tree_node "$_project" "$_service" "$_indent" "$_connector" "$_svc_w" "$_parent" true
+    return
   fi
 
-  _graph_print_tree_node "$_project" "$_service" "$_indent" "$_connector" "$_svc_w" "$_parent"
+  _graph_path_push "$_service"
+  _graph_print_tree_node "$_project" "$_service" "$_indent" "$_connector" "$_svc_w" "$_parent" false
 
   _children=$(_graph_children "$_project" "$_service")
   _child_total=$(_graph_count_lines "$_children")
@@ -477,6 +655,9 @@ _graph_print_tree() {
     _graph_print_tree "$_project" "$_child" "$_next_indent" "$_next_conn" "$_svc_w" "$_service"
     _child_index=$((_child_index + 1))
   done <<< "$_children"
+
+  _graph_path_pop
+  _graph_done_add "$_service"
 }
 
 _print_dependency_graph() {
@@ -498,12 +679,11 @@ _print_dependency_graph() {
     fi
   done <<< "$_participants"
 
-  # No roots (cycle): start from every participant once
+  # No roots (pure cycle component): start from every participant once
   if [[ -z "$_roots" ]]; then
     _roots="$_participants"
   fi
 
-  # Column width = max service name among edge participants
   _svc_w=0
   while IFS= read -r _service; do
     [[ -z "$_service" ]] && continue
@@ -519,15 +699,17 @@ _print_dependency_graph() {
   printf '┌%s%s · depends_on%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
 
   _printed_root=false
-  _graph_visited=""
+  _graph_path=""
+  _graph_done=""
   while IFS= read -r _service; do
     [[ -z "$_service" ]] && continue
-    if echo "$_graph_visited" | grep -Fxq "$_service" 2>/dev/null; then
+    if _graph_done_has "$_service"; then
       continue
     fi
     if [[ "$_printed_root" == true ]]; then
       printf '│\n'
     fi
+    _graph_path=""
     _graph_print_tree "$_project" "$_service" "" "" "$_svc_w"
     _printed_root=true
   done <<< "$_roots"
