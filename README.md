@@ -15,12 +15,17 @@ By default shows a **compact** list, with Docker Compose containers **grouped by
 3. **`docker inspect`** — reads Compose project/service labels to group related containers.
 4. **Render** — compact lines (default) or full cards (`-v`), grouped under project headers.
 
-Default compact output for a Compose project:
+Default compact output for a Compose project (aligned columns inside one card):
 
 ```
-── paperless ──
-  webserver  (paperless-webserver-1)  0.0.0.0:8000->8000/tcp  Up 2 hours
-  db         (paperless-db-1)         -                       Up 2 hours
+┌server
+│ grafana               0.0.0.0:3000->3000/tcp    Up 31 hours
+│ dcgm-exporter         -                         Up 31 hours
+│ prometheus            9090/tcp                  Up 31 hours
+│ cadvisor              8080/tcp                  Up 31 hours (healthy)
+│ node-exporter         9100/tcp                  Up 31 hours
+│ nvidia-gpu-exporter   9835/tcp                  Up 31 hours
+└─────────────────────────────────────────────────────────────
 ```
 
 Non-Compose containers (`docker run`, etc.) stay as individual compact cards:
@@ -155,9 +160,10 @@ dps -ls
 Example output:
 
 ```
-── paperless ──
-  webserver  (paperless-webserver-1)  0.0.0.0:8000->8000/tcp  Up 2 hours
-  ↳ [Source]  /home/user/projects/paperless
+┌paperless
+│ webserver   0.0.0.0:8000->8000/tcp  Up 2 hours
+│   ↳ [Source]  /home/user/projects/paperless
+└─────────────────────────────────────────────
 ```
 
 Only shown when the container has the `com.docker.compose.project.working_dir` label (Compose V2). Plain `docker run` containers are skipped.
@@ -173,8 +179,9 @@ dps -a -d
 Example output:
 
 ```
-── infogram ──
-  frontend  (infogram-frontend)  …  Up 2 hours
+┌infogram
+│ frontend   …  Up 2 hours
+└──────────────────────────
 
 ── infogram dependencies ──
   elasticsearch  (infogram-es)
@@ -210,10 +217,11 @@ dps -mi
 Example output:
 
 ```
-── paperless ──
-  webserver  (paperless-webserver-1)  0.0.0.0:8000->8000/tcp  Up 2 hours
-  ↳ [Memory]  512MiB / 2GiB
-  ↳ [Image]  ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
+┌paperless
+│ webserver   0.0.0.0:8000->8000/tcp  Up 2 hours
+│   ↳ [Memory]  512MiB / 2GiB
+│   ↳ [Image]  ghcr.io/paperless-ngx/paperless-ngx:dev  (1.29GB)
+└─────────────────────────────────────────────
 ```
 
 Combine with other flags:

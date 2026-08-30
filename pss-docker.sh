@@ -507,24 +507,25 @@ _register_container_graph() {
 
 _print_extras() {
   local _names="$1" _id="$2" _image="$3"
+  local _prefix="${4:-  }"
   local _compose_dir _mem _img_info _img_tag _img_size
 
   if [[ "$_show_memory" == true ]]; then
     _mem=$(_lookup_memory "$_names")
-    printf '  ↳ [%sMemory%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_mem"
+    printf '%s↳ [%sMemory%s]  %s\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_mem"
   fi
 
   if [[ "$_show_image" == true ]]; then
     _img_info=$(_lookup_image_info "$_id" "$_image")
     _img_tag="${_img_info%%|*}"
     _img_size="${_img_info##*|}"
-    printf '  ↳ [%sImage%s]  %s  (%s)\n' "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
+    printf '%s↳ [%sImage%s]  %s  (%s)\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_img_tag" "$_img_size"
   fi
 
   if [[ "$_show_compose_source" == true ]]; then
     _compose_dir=$(_lookup_compose_dir "$_id")
     if [[ -n "$_compose_dir" ]]; then
-      printf '  ↳ [%sSource%s]  %s\n' "$_C_LABEL" "$_C_RESET" "$_compose_dir"
+      printf '%s↳ [%sSource%s]  %s\n' "$_prefix" "$_C_LABEL" "$_C_RESET" "$_compose_dir"
     fi
   fi
 
@@ -571,37 +572,118 @@ _print_card() {
   _print_extras "$_names" "$_id" "$_image"
 }
 
+_str_len() {
+  printf '%s' "$1" | wc -c | tr -d '[:space:]'
+}
+
+_simplify_ports() {
+  local _ports="$1" _out
+  if [[ -z "$_ports" ]]; then
+    printf '-'
+    return
+  fi
+  # Drop dual-stack IPv6 duplicates: "0.0.0.0:80->80/tcp, [::]:80->80/tcp" → "0.0.0.0:80->80/tcp"
+  _out=$(printf '%s' "$_ports" | sed -E \
+    -e 's/, *\[::\]:[0-9]+->[^,]+//g' \
+    -e 's/^\[::\]:[0-9]+->[^,]+(, *)?//' \
+    -e 's/^, *//' \
+    -e 's/, *$//' \
+    -e 's/  +/ /g')
+  if [[ -z "$_out" ]]; then
+    printf '%s' "$_ports"
+  else
+    printf '%s' "$_out"
+  fi
+}
+
+_service_label() {
+  local _service="$1" _names="$2"
+  if [[ -n "$_service" ]]; then
+    printf '%s' "$_service"
+  else
+    printf '%s' "$_names"
+  fi
+}
+
 _print_project_header() {
   local _project="$1"
   printf '%s── %s ──%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
 }
 
-_print_grouped_lite_line() {
-  local _service="$1" _names="$2" _ports="$3" _state="$4" _status="$5" _id="$6" _image="$7"
-  local _sc _label _ports_disp
-  _sc=$(_state_color_code "$_state" "$_status")
+_project_records() {
+  local _project="$1" _rec _out=""
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    if [[ "$_c_project" == "$_project" ]]; then
+      if [[ -z "$_out" ]]; then
+        _out="$_rec"
+      else
+        _out="${_out}"$'\n'"$_rec"
+      fi
+    fi
+  done <<< "$_containers_data"
+  printf '%s' "$_out"
+}
 
-  if [[ -n "$_service" ]]; then
-    _label="$_service"
-  else
-    _label="$_names"
+_print_project_group_lite() {
+  local _project="$1"
+  local _recs _rec _svc _ports_disp _sc
+  local _svc_w=0 _ports_w=0 _len _rule_w _i
+
+  _recs=$(_project_records "$_project")
+  [[ -z "$_recs" ]] && return
+
+  # Measure columns for this project
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    _svc=$(_service_label "$_c_service" "$_c_names")
+    _ports_disp=$(_simplify_ports "$_c_ports")
+    _len=$(_str_len "$_svc")
+    if [[ "$_len" -gt "$_svc_w" ]]; then
+      _svc_w="$_len"
+    fi
+    _len=$(_str_len "$_ports_disp")
+    if [[ "$_len" -gt "$_ports_w" ]]; then
+      _ports_w="$_len"
+    fi
+  done <<< "$_recs"
+
+  # Minimum column widths for readability
+  if [[ "$_svc_w" -lt 8 ]]; then
+    _svc_w=8
+  fi
+  if [[ "$_ports_w" -lt 5 ]]; then
+    _ports_w=5
   fi
 
-  if [[ -n "$_ports" ]]; then
-    _ports_disp="$_ports"
-  else
-    _ports_disp="-"
+  # Header width: "│ " + svc + "  " + ports + "  " + ~20 for status
+  _rule_w=$((2 + _svc_w + 2 + _ports_w + 2 + 18))
+  if [[ "$_rule_w" -lt 17 ]]; then
+    _rule_w=17
   fi
 
-  if [[ -n "$_service" && "$_service" != "$_names" ]]; then
-    printf '  %s%s%s  (%s)  %s  %s%s%s\n' \
-      "$_sc" "$_label" "$_C_RESET" "$_names" "$_ports_disp" "$_sc" "$_status" "$_C_RESET"
-  else
-    printf '  %s%s%s  %s  %s%s%s\n' \
-      "$_sc" "$_label" "$_C_RESET" "$_ports_disp" "$_sc" "$_status" "$_C_RESET"
-  fi
-
-  _print_extras "$_names" "$_id" "$_image"
+  printf '┌%s%s%s\n' "$_C_LABEL" "$_project" "$_C_RESET"
+  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+    [[ -z "${_rec:-}" ]] && continue
+    _parse_container_record "$_rec"
+    _svc=$(_service_label "$_c_service" "$_c_names")
+    _ports_disp=$(_simplify_ports "$_c_ports")
+    _sc=$(_state_color_code "$_c_state" "$_c_status")
+    printf '│ %s%-*s%s  %-*s  %s%s%s\n' \
+      "$_sc" "$_svc_w" "$_svc" "$_C_RESET" \
+      "$_ports_w" "$_ports_disp" \
+      "$_sc" "$_c_status" "$_C_RESET"
+    _print_extras "$_c_names" "$_c_id" "$_c_image" "│   "
+  done <<< "$_recs"
+  printf '└'
+  _i=0
+  while [[ "$_i" -lt "$_rule_w" ]]; do
+    printf '─'
+    _i=$((_i + 1))
+  done
+  printf '\n'
 }
 
 _parse_container_record() {
@@ -626,12 +708,9 @@ _parse_container_record() {
 }
 
 _print_container_entry() {
+  # Non-compose lite cards, or verbose full cards (with optional project header outside).
   if [[ "$_lite" == true ]]; then
-    if [[ -n "$_c_project" ]]; then
-      _print_grouped_lite_line "$_c_service" "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
-    else
-      _print_card_lite "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
-    fi
+    _print_card_lite "$_c_names" "$_c_ports" "$_c_state" "$_c_status" "$_c_id" "$_c_image"
   else
     _print_card "$_c_names" "$_c_image" "$_c_ports" "$_c_id" "$_c_command" \
       "$_c_created_at" "$_c_running_for" "$_c_state" "$_c_status" "$_c_size" "$_c_networks"
@@ -718,14 +797,18 @@ while IFS= read -r _project || [[ -n "${_project:-}" ]]; do
   if [[ "$_printed_any" == true ]]; then
     printf '\n'
   fi
-  _print_project_header "$_project"
-  while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
-    [[ -z "${_rec:-}" ]] && continue
-    _parse_container_record "$_rec"
-    if [[ "$_c_project" == "$_project" ]]; then
-      _print_container_entry
-    fi
-  done <<< "$_containers_data"
+  if [[ "$_lite" == true ]]; then
+    _print_project_group_lite "$_project"
+  else
+    _print_project_header "$_project"
+    while IFS= read -r _rec || [[ -n "${_rec:-}" ]]; do
+      [[ -z "${_rec:-}" ]] && continue
+      _parse_container_record "$_rec"
+      if [[ "$_c_project" == "$_project" ]]; then
+        _print_container_entry
+      fi
+    done <<< "$_containers_data"
+  fi
   _printed_any=true
 done <<< "$_display_projects"
 
